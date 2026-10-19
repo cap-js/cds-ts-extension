@@ -1,0 +1,134 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.0.5/schema.json",
+	"assist": { "actions": { "source": { "organizeImports": "on" } } },
+	"json": {
+		"parser": {
+			"allowComments": true
+		},
+		"formatter": {
+			"indentWidth": 4
+		}
+	},
+	"vcs": {
+		"useIgnoreFile": true
+	},
+	"files": {
+		"includes": [
+			"**",
+			"!**/node_modules",
+			"!dist/**",
+			"!test/data/**",
+			"!**/@cds-models/**"
+		]
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"complexity": {
+				"noExcessiveCognitiveComplexity": "info",
+				"noStaticOnlyClass": "error",
+				"noUselessLoneBlockStatements": "off",
+				"noVoid": "error",
+				"useLiteralKeys": "info",
+				"useSimplifiedLogicExpression": "error"
+			},
+			"correctness": {
+				"noNodejsModules": "off",
+				"noUnusedImports": "error",
+				"useImportExtensions": "off",
+				"noSwitchDeclarations": "error"
+			},
+			"performance": {
+				"noBarrelFile": "info",
+				"noReExportAll": "info",
+				"noNamespaceImport": "info"
+			},
+			"style": {
+				"noNonNullAssertion": "info",
+				"noParameterAssign": "error",
+				"noParameterProperties": "off",
+				"useConsistentArrayType": "error",
+				"useEnumInitializers": "off",
+				"useFilenamingConvention": "off",
+				"useExplicitLengthCheck": "info",
+				"useNamingConvention": {
+					"level": "info",
+					"options": {
+						"conventions": [
+							{
+								"selector": {
+									"kind": "importNamespace"
+								},
+								"formats": ["camelCase", "PascalCase", "CONSTANT_CASE"]
+							},
+							{
+								"selector": {
+									"kind": "classMethod",
+									"modifiers": ["private"]
+								},
+								"formats": ["camelCase"]
+							},
+							{
+								"selector": {
+									"kind": "classMember",
+									"modifiers": ["private"]
+								},
+								"match": "_(.+)"
+							},
+							{
+								"selector": {
+									"kind": "classProperty",
+									"modifiers": ["static", "readonly"]
+								},
+								"formats": ["CONSTANT_CASE"]
+							},
+							{
+								"selector": {
+									"kind": "const",
+									"scope": "global"
+								},
+								"match": "__(.+)__|_SPECIAL_|(.+)",
+								"formats": ["CONSTANT_CASE", "camelCase"]
+							},
+							{
+								"selector": {
+									"kind": "interface"
+								},
+								"match": "_?I?(.*)|(.*)Error",
+								"formats": ["PascalCase"]
+							},
+							{
+								"selector": {
+									"kind": "typeAlias"
+								},
+								"formats": ["PascalCase", "CONSTANT_CASE"]
+							}
+						]
+					}
+				},
+				"useAsConstAssertion": "error",
+				"useDefaultParameterLast": "error",
+				"useSelfClosingElements": "error",
+				"useSingleVarDeclarator": "error",
+				"noUnusedTemplateLiteral": "error",
+				"useNumberNamespace": "error",
+				"noInferrableTypes": "error",
+				"noUselessElse": "error"
+			},
+			"suspicious": {
+				"noAssignInExpressions": "info",
+				"noExplicitAny": "warn",
+				"noExtraNonNullAssertion": "error",
+				"noSkippedTests": "error",
+				"useAwait": "info"
+			}
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"indentStyle": "space",
+			"indentWidth": 4,
+			"quoteStyle": "single"
+		}
+	}
+}

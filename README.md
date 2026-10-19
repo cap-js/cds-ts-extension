@@ -1,65 +1,95 @@
-[![REUSE status](https://api.reuse.software/badge/github.com/cap-js/cds-ts-extension)](https://api.reuse.software/info/github.com/cap-js/cds-ts-extension)
+# @cap-js/cds-ts-extension
 
-# cds-ts-extension
+A [TypeScript Language Service Plugin](https://github.com/microsoft/TypeScript/wiki/Writing-a-Language-Service-Plugin)
+that provides CQL-aware completions, hover, diagnostics, and type inference inside
+`` cds.ql`...` `` tagged template literals in `.js`/`.ts` files.
 
-## About this project
+It runs inside the TypeScript server process. After registration it has no dependency
+on the CDS Language Server — it resolves `@sap/cds` directly from the user's project
+(with a global-install fallback) via a child-process worker.
 
-_Insert a short description of your project here..._
+> The full design documentation — features, the snapshot-rewriting invariants,
+> configuration, diagnostic codes, and the worker protocol — lives in
+> [`DEVELOPMENT.md`](./DEVELOPMENT.md).
 
-## Requirements and Setup
+## Layout
 
-_Insert a short description what is required to get your project running..._
+| Path | Contents |
+|------|----------|
+| `src/` | Plugin source. `index.js` is the plugin factory; `cds-resolver-worker.js` is the child-process worker. No build step — tsserver loads the JS files directly. |
+| `test/` | Native `node:test` suites; `test/data/distributedModel/` is a CDS fixture project. |
 
-## Tests
+## Scripts
 
-In `tests/bookshop/` you can find a sample application that is used to demonstrate how to use the plugin and to run tests against it.
+| Command | Description |
+|---------|-------------|
+| `npm test` | Run all three test suites. |
+| `npm run typecheck` | `tsc --noEmit` (checks JS via JSDoc types). |
+| `npm run lint` | Biome lint (fails on error-level diagnostics). |
+| `npm run format` | Biome format (write). |
+| `npm run coverage` | Run tests with native V8 coverage and enforce thresholds. |
+| `npm run check` | Full quality gate: typecheck + lint + coverage. Mirrors CI. |
 
-### Local Testing
+## Using the plugin locally in VS Code
 
-To execute local tests, simply run:
+The plugin is shipped and activated by the `vscode-cds` extension, which bundles it
+as a dependency and registers it with tsserver via `contributes.typescriptServerPlugins`.
 
-```bash
-npm run test
+### Development setup (vscode-cds + this repo)
+
+1. Open `vscode-cds` in VS Code.
+2. Run `npm install` inside `vscode-cds/extension/` to install dependencies (this
+   repo is referenced as `"file:../../cds-ts-plugin"`, so the local checkout is used).
+3. Launch the **Extension Host** (`F5`).
+4. In the newly opened window, open a CAP project.
+5. Enable the features you want in VS Code settings (all are opt-in):
+
+```json
+"cds.ql.completion": true,
+"cds.ql.hover": true,
+"cds.ql.diagnostics": true,
+"cds.ql.typeInference": true
 ```
 
-For tests, the `cds-test` Plugin is used to spin up the application. More information about `cds-test` can be found [here](https://cap.cloud.sap/docs/node.js/cds-test).
+6. Open a `.js` or `.ts` file that uses `` cds.ql`SELECT ...` ``.
 
-### Hybrid Testing
+Because `src/index.js` is the entry point directly, any edits to `src/` are picked up
+after **TypeScript: Restart TS Server** — no build step required.
 
-#### Local
+### Using a local checkout in a CAP project (without vscode-cds dev setup)
 
-In the case of hybrid tests (i.e., tests that run with a real BTP service), you can bind the service instance to the local application like this:
+If you want to test the plugin in isolation inside a project:
 
-```bash
-cds bind -2 my-service
+```sh
+# In your CAP project:
+npm install /path/to/cds-ts-plugin
 ```
 
-More on `cds bind` can be found [here](https://pages.github.tools.sap/cap/docs/advanced/hybrid-testing#cds-bind-usage)
+Then add to the project's `tsconfig.json` or `jsconfig.json`:
 
-The hybrid integration tests can be run via:
-
-```bash
-npm run test:hybrid
+```json
+{
+  "compilerOptions": {
+    "plugins": [{ "name": "@cap-js/cds-ts-extension" }]
+  }
+}
 ```
 
-#### CI
+And enable features in `.vscode/settings.json`:
 
-For CI, the service binding is added during the action run. Uncomment the _Bind against BTP services_ and _BTP Auth_ sections in the file `.github/actions/integration-tests/action.yml` and adjust the service name/names accordingly. The `cds bind` command executed there will be the almost the same as done locally before, with the difference that it will be written to package.json in CI.
+```json
+"cds.ql.completion": true,
+"cds.ql.hover": true,
+"cds.ql.diagnostics": true,
+"cds.ql.typeInference": true
+```
 
-You can also execute the tests against a HANA Cloud instance. For that, add the commented sections in the action file and adjust accordingly.
+## Requirements
 
-## Support, Feedback, Contributing
+- Node.js >= 24 (native test runner with coverage thresholds).
+- `@sap/cds` is a devDependency so the worker/model-loading tests can load a real model.
 
-This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/cap-js/<your-project>/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](CONTRIBUTING.md).
+## Coverage thresholds
 
-## Security / Disclosure
-
-If you find any bug that may be a security problem, please follow the instructions found [in our security policy](https://github.com/cap-js/<your-project>/security/policy) on how to report it. Please do not create GitHub issues for security-related doubts or problems.
-
-## Code of Conduct
-
-We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone. By participating in this project, you agree to abide by its [Code of Conduct](https://github.com/cap-js/.github/blob/main/CODE_OF_CONDUCT.md) at all times.
-
-## Licensing
-
-Copyright 2026 SAP SE or an SAP affiliate company and cds-ts-extension contributors. Please see our [LICENSE](./LICENSES/Apache-2.0.txt) for copyright and license information. Detailed information including third-party components and their licensing/copyright information is available [via the REUSE tool](https://api.reuse.software/info/github.com/cap-js/<your-project>).
+Enforced via the native test runner (`--test-coverage-*`): lines 98%, functions 96.7%,
+branches 92%.

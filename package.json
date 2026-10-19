@@ -1,0 +1,40 @@
+{
+    "name": "@cap-js/cds-ts-extension",
+    "version": "0.0.1",
+    "description": "TypeScript Language Service Plugin providing CQL-aware completions, hover, diagnostics, and type inference inside cds.ql`...` tagged template literals.",
+    "keywords": [
+        "CAP",
+        "CDS",
+        "CQL",
+        "SAP",
+        "typescript",
+        "tsserver-plugin"
+    ],
+    "main": "src/index.js",
+    "exports": {
+        ".": "./src/index.js"
+    },
+    "files": [
+        "src",
+        "README.md"
+    ],
+    "engines": {
+        "node": ">=24.0.0"
+    },
+    "scripts": {
+        "typecheck": "tsc --noEmit",
+        "lint": "biome lint --diagnostic-level=error src test",
+        "lint:fix": "biome lint --write src test",
+        "format": "biome format --write src test",
+        "format:check": "biome format src test",
+        "test": "node --test test/test-ql-query.js test/test-ql-ls.js test/test-ql-plugin.js",
+        "coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-exclude='test/**' --test-coverage-lines=98 --test-coverage-functions=96.7 --test-coverage-branches=92 test/test-ql-query.js test/test-ql-ls.js test/test-ql-plugin.js",
+        "check": "npm run typecheck && npm run format:check && npm run lint && npm run coverage"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "^2",
+        "@sap/cds": "10.x",
+        "@types/node": "24.x",
+        "typescript": "6.x"
+    }
+}

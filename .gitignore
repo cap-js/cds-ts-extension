@@ -1,7 +1,9 @@
-.DS_Store
 node_modules/
-gen/
-package-lock.json
-.env
-.cdsrc-private.json
-resources/*
+dist/
+coverage/
+*.log
+.DS_Store
+@cds-models
+
+# fixture dependencies are installed, not committed
+test/data/**/node_modules/
