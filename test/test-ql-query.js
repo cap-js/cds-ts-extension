@@ -829,7 +829,7 @@ function posOf(src, needle, occurrence = 0) {
 }
 
 /** Build a minimal QueryContext with a given source text and worker. */
-function makeCtx(origText, worker = EMPTY_WORKER, projectRoot = '/proj', fileName = 'test.ts', batchWorker) {
+function makeCtx(origText, worker = EMPTY_WORKER, projectRoot = '/proj', fileName = 'test.ts', batchWorker = undefined) {
     const origSf = parseTs(origText, fileName);
     // Hover now resolves the row type through the batch worker (same path as the
     // type rewriter). When no explicit batch worker is given, derive one from the
