@@ -54,10 +54,7 @@ const readConfig = (raw) => {
         'cds.ql.hover': cfg['cds.ql.hover'] === true,
         'cds.ql.diagnostics': cfg['cds.ql.diagnostics'] === true,
         'cds.ql.typeInference': cfg['cds.ql.typeInference'] === true,
-        'cds.ql.debounceDelay':
-            typeof cfg['cds.ql.debounceDelay'] === 'number'
-                ? cfg['cds.ql.debounceDelay']
-                : 300,
+        'cds.ql.debounceDelay': typeof cfg['cds.ql.debounceDelay'] === 'number' ? cfg['cds.ql.debounceDelay'] : 300,
     };
 };
 
@@ -79,21 +76,11 @@ const readConfig = (raw) => {
 function resolveQueryContext(fileName, info, typescript, originalSource, runWorker, runBatchWorker, logger, projectRoot) {
     const scriptInfo = info.project.getScriptInfo(fileName);
     const liveSnap = scriptInfo && /** @type {any} */ (scriptInfo).__cdsOrigSnap?.();
-    const origText = liveSnap
-        ? liveSnap.getText(0, liveSnap.getLength())
-        : originalSource.get(fileName);
+    const origText = liveSnap ? liveSnap.getText(0, liveSnap.getLength()) : originalSource.get(fileName);
     if (!origText?.includes('cds.ql')) return null;
 
-    const scriptKind = /\.tsx?$/.test(fileName)
-        ? typescript.ScriptKind.TS
-        : typescript.ScriptKind.JS;
-    const origSf = typescript.createSourceFile(
-        fileName,
-        origText,
-        typescript.ScriptTarget.Latest,
-        true,
-        scriptKind,
-    );
+    const scriptKind = /\.tsx?$/.test(fileName) ? typescript.ScriptKind.TS : typescript.ScriptKind.JS;
+    const origSf = typescript.createSourceFile(fileName, origText, typescript.ScriptTarget.Latest, true, scriptKind);
 
     return { origText, origSf, projectRoot, logger, runWorker, runBatchWorker };
 }

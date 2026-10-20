@@ -39,7 +39,12 @@ const { csnEntryKind, csnText } = require('./csn');
  */
 
 /** @typedef {{ UnknownEntity: 9001, UnknownSource: 9002, UnknownField: 9003, AmbiguousField: 9004 }} CqlDiagnosticCodeEnum */
-const CqlDiagnosticCode = Object.freeze({ UnknownEntity: 9001, UnknownSource: 9002, UnknownField: 9003, AmbiguousField: 9004 });
+const CqlDiagnosticCode = Object.freeze({
+    UnknownEntity: 9001,
+    UnknownSource: 9002,
+    UnknownField: 9003,
+    AmbiguousField: 9004,
+});
 
 /**
  * @typedef {{ message: string, start: number, end: number, code: number }} CqlDiagnostic
@@ -130,8 +135,7 @@ function tokenizeCql(query) {
         if (ch === '/' && query[pos + 1] === '*') {
             const start = pos;
             pos += 2;
-            while (pos < len && !(/** @type {string} */ (query[pos]) === '*' && query[pos + 1] === '/'))
-                pos++;
+            while (pos < len && !(query[pos] === '*' && query[pos + 1] === '/')) pos++;
             pos += 2;
             tokens.push({
                 kind: 'whitespace',
@@ -183,11 +187,7 @@ function tokenizeCql(query) {
         // Operators
         if (/[=<>!+\-/%]/.test(ch)) {
             const start = pos;
-            if (
-                (ch === '<' || ch === '>' || ch === '!') &&
-                query[pos + 1] === '='
-            )
-                pos++;
+            if ((ch === '<' || ch === '>' || ch === '!') && query[pos + 1] === '=') pos++;
 
             if (ch === '<' && query[pos + 1] === '>') pos++;
             pos++;
@@ -261,20 +261,11 @@ function tokenizeCql(query) {
  * @returns {ExpandColumn[] | null}
  */
 function parseCqlColumns(queryText) {
-    const toks = tokenizeCql(queryText).filter(
-        (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-    );
-    const selectIdx = toks.findIndex(
-        (t) => t.kind === 'keyword' && t.value.toUpperCase() === 'SELECT',
-    );
+    const toks = tokenizeCql(queryText).filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
+    const selectIdx = toks.findIndex((t) => t.kind === 'keyword' && t.value.toUpperCase() === 'SELECT');
     if (selectIdx < 0) return [];
 
-    const fromIdx = toks.findIndex(
-        (t, i) =>
-            i > selectIdx &&
-            t.kind === 'keyword' &&
-            t.value.toUpperCase() === 'FROM',
-    );
+    const fromIdx = toks.findIndex((t, i) => i > selectIdx && t.kind === 'keyword' && t.value.toUpperCase() === 'FROM');
     if (fromIdx < 0) return [];
 
     // Postfix style: SELECT immediately followed by FROM (nothing between them)
@@ -282,10 +273,9 @@ function parseCqlColumns(queryText) {
         // Skip past entity name(s) and aliases to find the opening brace
         let i = fromIdx + 1;
         // consume: Entity [AS alias | alias] [JOIN ...]
-        while (
-            i < toks.length &&
-            !(/** @type {CqlToken} */ (toks[i]).kind === 'punctuation' && /** @type {CqlToken} */ (toks[i]).value === '{')
-        ) {
+        /** @param {number} idx @returns {CqlToken} */
+        const at = (idx) => /** @type {CqlToken} */ (toks[idx]);
+        while (i < toks.length && !(at(i).kind === 'punctuation' && at(i).value === '{')) {
             i++;
         }
         if (i >= toks.length) return null; // no brace block
@@ -307,9 +297,7 @@ function parseCqlColumns(queryText) {
  */
 function parseClassicColumns(toks) {
     // Filter to non-whitespace/unknown (already filtered by caller, but be safe)
-    const sig = toks.filter(
-        (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-    );
+    const sig = toks.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
     if (sig.length === 0) return null;
     if (sig.length === 1 && /** @type {CqlToken} */ (sig[0]).kind === 'star') return null; // SELECT *
 
@@ -329,18 +317,12 @@ function parseClassicColumns(toks) {
             continue;
         }
 
-        const field = tok.value.includes('.')
-            ? tok.value.split('.').pop() ?? tok.value
-            : tok.value;
+        const field = tok.value.includes('.') ? (tok.value.split('.').pop() ?? tok.value) : tok.value;
         let alias = field;
         i++;
 
         // AS alias only — implicit-alias detection is unreliable without comma boundaries
-        if (
-            i < sig.length &&
-            /** @type {CqlToken} */ (sig[i]).kind === 'keyword' &&
-            /** @type {CqlToken} */ (sig[i]).value.toUpperCase() === 'AS'
-        ) {
+        if (i < sig.length && /** @type {CqlToken} */ (sig[i]).kind === 'keyword' && /** @type {CqlToken} */ (sig[i]).value.toUpperCase() === 'AS') {
             i++; // skip AS
             if (i < sig.length && /** @type {CqlToken} */ (sig[i]).kind === 'identifier') {
                 alias = /** @type {CqlToken} */ (sig[i]).value;
@@ -362,9 +344,11 @@ function parseClassicColumns(toks) {
  */
 function parseBraceBlock(toks, start) {
     const result = [];
+    /** @param {number} idx @returns {CqlToken} */
+    const at = (idx) => /** @type {CqlToken} */ (toks[idx]);
     let i = start;
     while (i < toks.length) {
-        const tok = /** @type {CqlToken} */ (toks[i]);
+        const tok = at(i);
 
         if (tok.kind === 'punctuation' && tok.value === '}') {
             return [result.length > 0 ? result : null, i + 1];
@@ -375,11 +359,7 @@ function parseBraceBlock(toks, start) {
         }
         if (tok.kind === 'star') {
             // consume remaining until '}'
-            while (
-                i < toks.length &&
-                !(/** @type {CqlToken} */ (toks[i]).kind === 'punctuation' && /** @type {CqlToken} */ (toks[i]).value === '}')
-            )
-                i++;
+            while (i < toks.length && !(at(i).kind === 'punctuation' && at(i).value === '}')) i++;
             return [null, i + 1]; // * → all fields
         }
         if (tok.kind !== 'identifier') {
@@ -388,10 +368,8 @@ function parseBraceBlock(toks, start) {
         }
 
         // Identifier may have a trailing dot (inline expand: `author.{`) or a table qualifier
-        const rawVal = tok.value.endsWith('.')
-            ? tok.value.slice(0, -1)
-            : tok.value;
-        const field = rawVal.includes('.') ? rawVal.split('.').pop() ?? rawVal : rawVal;
+        const rawVal = tok.value.endsWith('.') ? tok.value.slice(0, -1) : tok.value;
+        const field = rawVal.includes('.') ? (rawVal.split('.').pop() ?? rawVal) : rawVal;
         // If the raw value ended with '.', the '{' is the very next token (no separate '.' token)
         const hasDot = tok.value.endsWith('.');
         let alias = field;
@@ -408,21 +386,13 @@ function parseBraceBlock(toks, start) {
         let isExpand = false;
         if (hasDot) {
             // Trailing dot already consumed in identifier — next token should be '{'
-            if (
-                i < toks.length &&
-                /** @type {CqlToken} */ (toks[i]).kind === 'punctuation' &&
-                /** @type {CqlToken} */ (toks[i]).value === '{'
-            ) {
+            if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'punctuation' && /** @type {CqlToken} */ (toks[i]).value === '{') {
                 i++; // skip '{'
                 isExpand = true;
             }
         } else {
             // Optional `AS alias`
-            if (
-                i < toks.length &&
-                /** @type {CqlToken} */ (toks[i]).kind === 'keyword' &&
-                /** @type {CqlToken} */ (toks[i]).value.toUpperCase() === 'AS'
-            ) {
+            if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'keyword' && /** @type {CqlToken} */ (toks[i]).value.toUpperCase() === 'AS') {
                 i++; // skip AS
                 if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'identifier') {
                     alias = /** @type {CqlToken} */ (toks[i]).value;
@@ -430,11 +400,7 @@ function parseBraceBlock(toks, start) {
                 }
             }
             // Expand block may follow either the bare field or the `AS alias`.
-            if (
-                i < toks.length &&
-                /** @type {CqlToken} */ (toks[i]).kind === 'punctuation' &&
-                /** @type {CqlToken} */ (toks[i]).value === '{'
-            ) {
+            if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'punctuation' && /** @type {CqlToken} */ (toks[i]).value === '{') {
                 i++; // skip '{'
                 isExpand = true;
             }
@@ -472,17 +438,10 @@ function parseBraceBlock(toks, start) {
  */
 function getTokenContext(query, cursorOffset, defs, prefix) {
     const tokens = tokenizeCql(query);
-    const token = tokens.find(
-        (t) =>
-            t.kind === 'identifier' &&
-            t.start <= cursorOffset &&
-            cursorOffset <= t.end,
-    );
+    const token = tokens.find((t) => t.kind === 'identifier' && t.start <= cursorOffset && cursorOffset <= t.end);
     if (!token) return null;
 
-    const significant = tokens.filter(
-        (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-    );
+    const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
     const tokIdx = significant.indexOf(token);
     if (tokIdx < 0) return { kind: 'unknown', token };
 
@@ -532,9 +491,7 @@ const isNonNull = (/** @type {unknown} */ x) => x !== null;
  * @returns {CqlClause}
  */
 function getCursorClause(tokens, cursorOffset) {
-    const significant = tokens.filter(
-        (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-    );
+    const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
 
     /** @type {CqlClause} */
     let clause = { kind: 'unknown' };
@@ -627,8 +584,7 @@ function getCursorClause(tokens, cursorOffset) {
                 fromSources.push({ entity: pendingEntity, ref: pendingEntity });
                 pendingEntity = null;
             }
-            if (kw !== 'ORDER' && kw !== 'GROUP' && kw !== 'BY')
-                afterOrderKeyword = false;
+            if (kw !== 'ORDER' && kw !== 'GROUP' && kw !== 'BY') afterOrderKeyword = false;
             // Inside a projection block, `AS` introduces a column alias (`assoc AS alias { … }`).
             // Preserve lastIdentifier (the association name) so an expand block opening after
             // the alias is still scoped to the association, not the alias. Elsewhere `AS`
@@ -648,27 +604,14 @@ function getCursorClause(tokens, cursorOffset) {
                 // We'll detect postfix when FROM comes next with nothing in between
                 // (tracked by checking whether any identifier was seen between SELECT and FROM)
             } else if (kw === 'FROM') {
-                if (
-                    clause.kind === 'select-item' &&
-                    clause.expandPath !== undefined &&
-                    clause.expandPath.length === 0 &&
-                    fromSources.length === 0 &&
-                    pendingEntity === null
-                ) {
+                if (clause.kind === 'select-item' && clause.expandPath !== undefined && clause.expandPath.length === 0 && fromSources.length === 0 && pendingEntity === null) {
                     // Nothing seen between SELECT and FROM → postfix mode
                     postfixMode = true;
                     postfixEntitySeen = false;
                 }
                 clause = { kind: 'from-source' };
                 expectAlias = false;
-            } else if (
-                kw === 'JOIN' ||
-                kw === 'INNER' ||
-                kw === 'LEFT' ||
-                kw === 'RIGHT' ||
-                kw === 'FULL' ||
-                kw === 'CROSS'
-            ) {
+            } else if (kw === 'JOIN' || kw === 'INNER' || kw === 'LEFT' || kw === 'RIGHT' || kw === 'FULL' || kw === 'CROSS') {
                 clause = { kind: 'from-source' };
                 expectAlias = false;
             } else if (kw === 'WHERE' || kw === 'HAVING' || kw === 'ON') {
@@ -678,8 +621,7 @@ function getCursorClause(tokens, cursorOffset) {
                 afterOrderKeyword = true;
                 expectAlias = false;
             } else if (kw === 'BY') {
-                if (afterOrderKeyword)
-                    clause = { kind: 'order-by', sources: fromSources };
+                if (afterOrderKeyword) clause = { kind: 'order-by', sources: fromSources };
                 expectAlias = false;
             } else if (kw === 'AS') {
                 if (pendingEntity !== null) expectAlias = true;
@@ -710,14 +652,9 @@ function getCursorClause(tokens, cursorOffset) {
         }
     }
 
-    if (pendingEntity !== null)
-        fromSources.push({ entity: pendingEntity, ref: pendingEntity });
+    if (pendingEntity !== null) fromSources.push({ entity: pendingEntity, ref: pendingEntity });
 
-    if (
-        clause.kind === 'select-item' ||
-        clause.kind === 'where-expr' ||
-        clause.kind === 'order-by'
-    ) {
+    if (clause.kind === 'select-item' || clause.kind === 'where-expr' || clause.kind === 'order-by') {
         clause.sources = fromSources;
     }
 
@@ -765,7 +702,10 @@ function extractSourceRelations(significant) {
 
         if (tok.kind === 'identifier') {
             if (expectAlias) {
-                sources.push({ entity: /** @type {string} */ (pendingEntity), ref: tok.value });
+                sources.push({
+                    entity: /** @type {string} */ (pendingEntity),
+                    ref: tok.value,
+                });
                 pendingEntity = null;
                 expectAlias = false;
             } else if (pendingEntity !== null) {
@@ -785,8 +725,7 @@ function extractSourceRelations(significant) {
         }
     }
 
-    if (pendingEntity !== null)
-        sources.push({ entity: pendingEntity, ref: pendingEntity });
+    if (pendingEntity !== null) sources.push({ entity: pendingEntity, ref: pendingEntity });
     return sources;
 }
 
@@ -865,9 +804,7 @@ function isToMany(el) {
 }
 
 /** @param {CqlToken | undefined} t @returns {boolean} */
-const isFromJoinKw = (t) =>
-    t?.kind === 'keyword' &&
-    /^(FROM|JOIN|INNER|LEFT|RIGHT|FULL|CROSS)$/i.test(t.value);
+const isFromJoinKw = (t) => t?.kind === 'keyword' && /^(FROM|JOIN|INNER|LEFT|RIGHT|FULL|CROSS)$/i.test(t.value);
 
 /**
  * @param {CsnDefs} defs
@@ -878,12 +815,10 @@ const isFromJoinKw = (t) =>
 function resolveSource(defs, name, prefix) {
     const key = prefix ? `${prefix}.${name}` : name;
     const artifact = defs[key];
-    if (artifact?.kind && SOURCE_KINDS.has(artifact.kind))
-        return { fqn: key, artifact };
+    if (artifact?.kind && SOURCE_KINDS.has(artifact.kind)) return { fqn: key, artifact };
     // Also try fully-qualified lookup when name already includes a dot
     const byFqn = name.includes('.') ? defs[name] : undefined;
-    if (byFqn?.kind && SOURCE_KINDS.has(byFqn.kind))
-        return { fqn: name, artifact: byFqn };
+    if (byFqn?.kind && SOURCE_KINDS.has(byFqn.kind)) return { fqn: name, artifact: byFqn };
     return null;
 }
 
@@ -940,12 +875,7 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
     // the partial word was consumed as an entity name (e.g. "FROM Auth|").
     // Retry with the cursor moved to just before that token to detect FROM context.
     if (clause.kind === 'unknown') {
-        const tokenAtCursor = tokens.find(
-            (t) =>
-                t.kind === 'identifier' &&
-                t.start < cursorOffset &&
-                t.end >= cursorOffset,
-        );
+        const tokenAtCursor = tokens.find((t) => t.kind === 'identifier' && t.start < cursorOffset && t.end >= cursorOffset);
         if (tokenAtCursor) {
             clause = getCursorClause(tokens, tokenAtCursor.start);
         }
@@ -955,33 +885,21 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
         case 'select-item':
         case 'where-expr':
         case 'order-by': {
-            const significant = tokens.filter(
-                (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-            );
-            const effectiveSources =
-                clause.sources.length > 0
-                    ? clause.sources
-                    : extractSourceRelations(significant);
+            const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
+            const effectiveSources = clause.sources.length > 0 ? clause.sources : extractSourceRelations(significant);
             const sources = GET_MODEL_SOURCES(defs, effectiveSources, prefix);
             /** @type {CompletionEntry[]} */
             const items = [];
 
             // If inside an expand block, scope completions to the terminal association's target entity
-            const expandPath =
-                clause.kind === 'select-item' ? clause.expandPath : [];
+            const expandPath = clause.kind === 'select-item' ? clause.expandPath : [];
             if (expandPath.length > 0) {
                 for (const { fqn } of sources) {
                     const terminal = followAssocPath(defs, fqn, expandPath);
                     if (!terminal) continue;
-                    for (const [name, element] of Object.entries(
-                        terminal.elements ?? {},
-                    )) {
+                    for (const [name, element] of Object.entries(terminal.elements ?? {})) {
                         const el = element;
-                        const doc =
-                            csnText(el.doc) ??
-                            el['@description']?.val ??
-                            el['@title']?.val ??
-                            undefined;
+                        const doc = csnText(el.doc) ?? el['@description']?.val ?? el['@title']?.val ?? undefined;
                         items.push({
                             label: name,
                             kind: 'field',
@@ -997,15 +915,9 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
             }
 
             for (const { fqn, artifact } of sources) {
-                for (const [name, element] of Object.entries(
-                    artifact.elements ?? {},
-                )) {
+                for (const [name, element] of Object.entries(artifact.elements ?? {})) {
                     const el = element;
-                    const doc =
-                        csnText(el.doc) ??
-                        el['@description']?.val ??
-                        el['@title']?.val ??
-                        undefined;
+                    const doc = csnText(el.doc) ?? el['@description']?.val ?? el['@title']?.val ?? undefined;
                     items.push({
                         label: name,
                         kind: 'field',
@@ -1024,8 +936,7 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
             const items = [];
             const qualifier = prefix ? prefix + '.' : null;
             for (const [fqn, artifact] of Object.entries(defs)) {
-                if (!(artifact.kind && SOURCE_KINDS.has(artifact.kind)))
-                    continue;
+                if (!(artifact.kind && SOURCE_KINDS.has(artifact.kind))) continue;
                 if (qualifier) {
                     if (fqn.startsWith(qualifier)) {
                         const localName = fqn.slice(qualifier.length);
@@ -1062,9 +973,7 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
 function validateCqlQuery(query, defs, prefix) {
     const errors = [];
     const tokens = tokenizeCql(query);
-    const significant = tokens.filter(
-        (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-    );
+    const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
 
     // Collect FROM/JOIN sources and validate them
     const fromEntries = collectFromSourceTokens(significant);
@@ -1095,8 +1004,7 @@ function validateCqlQuery(query, defs, prefix) {
     for (const { ref, artifact } of resolvedSources) {
         const names = new Set(Object.keys(artifact.elements ?? {}));
         sourceElements.set(ref, names);
-        for (const name of names)
-            elementCount.set(name, (elementCount.get(name) ?? 0) + 1);
+        for (const name of names) elementCount.set(name, (elementCount.get(name) ?? 0) + 1);
     }
 
     let depth = 0;
@@ -1129,14 +1037,11 @@ function validateCqlQuery(query, defs, prefix) {
                 expandArtifactStack.push(root);
             } else {
                 // Nested expand — look up association target from parent artifact
-                const parent = /** @type {import('./csn').CsnArtifact | null | undefined} */ (
-                    expandArtifactStack[expandArtifactStack.length - 1]);
+                const parent = /** @type {import('./csn').CsnArtifact | null | undefined} */ (expandArtifactStack[expandArtifactStack.length - 1]);
                 if (parent && lastIdentifier) {
                     const el = /** @type {import('./csn').CsnElement | undefined} */ (parent.elements?.[lastIdentifier]);
                     const targetName = /** @type {string | undefined} */ (el?.target);
-                    expandArtifactStack.push(
-                        targetName ? (defs[targetName] ?? null) : null,
-                    );
+                    expandArtifactStack.push(targetName ? (defs[targetName] ?? null) : null);
                 } else {
                     expandArtifactStack.push(null);
                 }
@@ -1158,8 +1063,7 @@ function validateCqlQuery(query, defs, prefix) {
 
         if (tok.kind === 'keyword') {
             const kw = tok.value.toUpperCase();
-            if (kw !== 'ORDER' && kw !== 'GROUP' && kw !== 'BY')
-                afterOrderKeyword = false;
+            if (kw !== 'ORDER' && kw !== 'GROUP' && kw !== 'BY') afterOrderKeyword = false;
             if (kw !== 'AS') expectAlias = false;
             lastIdentifier = null;
             switch (kw) {
@@ -1212,15 +1116,10 @@ function validateCqlQuery(query, defs, prefix) {
 
         lastIdentifier = tok.value;
 
-        if (
-            clause === 'select' ||
-            clause === 'where' ||
-            clause === 'order_by'
-        ) {
+        if (clause === 'select' || clause === 'where' || clause === 'order_by') {
             // Inside an expand block — validate against the current expand context entity
             if (braceDepth > 0) {
-                const expandArtifact =
-                    expandArtifactStack[expandArtifactStack.length - 1];
+                const expandArtifact = expandArtifactStack[expandArtifactStack.length - 1];
                 if (expandArtifact) {
                     const elements = expandArtifact.elements ?? {};
                     if (!Object.hasOwn(elements, tok.value)) {
@@ -1268,9 +1167,7 @@ function validateCqlQuery(query, defs, prefix) {
                     });
                 } else if (count > 1) {
                     const sourceNames = resolvedSources
-                        .filter((s) =>
-                            sourceElements.get(s.ref)?.has(tok.value),
-                        )
+                        .filter((s) => sourceElements.get(s.ref)?.has(tok.value))
                         .map((s) => s.ref)
                         .join(', ');
                     errors.push({
@@ -1337,7 +1234,10 @@ function collectFromSourceTokens(significant) {
 
         if (tok.kind === 'identifier') {
             if (expectAlias) {
-                result.push({ entityToken: /** @type {CqlToken} */ (pendingEntity), ref: tok.value });
+                result.push({
+                    entityToken: /** @type {CqlToken} */ (pendingEntity),
+                    ref: tok.value,
+                });
                 pendingEntity = null;
                 expectAlias = false;
             } else if (pendingEntity !== null) {
@@ -1362,8 +1262,7 @@ function collectFromSourceTokens(significant) {
         }
     }
 
-    if (pendingEntity !== null)
-        result.push({ entityToken: pendingEntity, ref: pendingEntity.value });
+    if (pendingEntity !== null) result.push({ entityToken: pendingEntity, ref: pendingEntity.value });
     return result;
 }
 

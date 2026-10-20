@@ -33,6 +33,6 @@ const csnText = (v) => (typeof v === 'string' ? v : v?.val);
  * @param {string | undefined} kind
  * @returns {'entity' | 'view'}
  */
-const csnEntryKind = (kind) => kind === 'view' ? 'view' : 'entity';
+const csnEntryKind = (kind) => (kind === 'view' ? 'view' : 'entity');
 
 module.exports = { csnText, csnEntryKind };

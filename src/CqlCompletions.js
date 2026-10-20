@@ -2,11 +2,7 @@
 
 /** @typedef {import('typescript/lib/tsserverlibrary')} TS */
 
-const {
-    findCdsQueryTemplate,
-    extractTemplateText,
-    offsetInTemplate,
-} = require('./CqlTypeRewriter');
+const { findCdsQueryTemplate, extractTemplateText, offsetInTemplate } = require('./CqlTypeRewriter');
 const { findAncestor } = require('./TsAstHelpers');
 const { serviceAnnotationFor } = require('./ServiceAnnotation');
 /** @typedef {import('./QueryContext').QueryContext} QueryContext */
@@ -22,39 +18,25 @@ const { serviceAnnotationFor } = require('./ServiceAnnotation');
  * @param {TS} typescript
  * @returns {import('typescript').CompletionInfo | null}
  */
-function getCqlCompletions(
-    fileName,
-    position,
-    ctx,
-    typescript,
-) {
+function getCqlCompletions(fileName, position, ctx, typescript) {
     const { origText, origSf, projectRoot, runWorker, logger } = ctx;
 
     const resolved = findCdsQueryTemplate(typescript, origSf, position);
-    logger.info(
-        `[cds-plugin] completions pos=${position} origTextLen=${origText.length} foundTemplate=${!!resolved}`,
-    );
+    logger.info(`[cds-plugin] completions pos=${position} origTextLen=${origText.length} foundTemplate=${!!resolved}`);
     if (!resolved) return null;
 
     const queryText = extractTemplateText(typescript, resolved);
     const cursorOff = offsetInTemplate(typescript, resolved, position);
     const prefix = serviceAnnotationFor(typescript, origText, resolved, origSf);
 
-    logger.info(
-        `[cds-plugin] completions at offset ${cursorOff} prefix="${prefix}" in "${queryText.trim().slice(0, 60)}"`,
-    );
+    logger.info(`[cds-plugin] completions at offset ${cursorOff} prefix="${prefix}" in "${queryText.trim().slice(0, 60)}"`);
 
-    const result = runWorker(
-        [projectRoot, queryText, String(cursorOff), prefix ?? ''],
-        logger,
-    );
+    const result = runWorker([projectRoot, queryText, String(cursorOff), prefix ?? ''], logger);
     if (result?.error) {
         // The model failed to load/compile (e.g. a missing `using ... from '@capire/...'`
         // dependency, or no @sap/cds resolvable). We stay strict — no partial model — but
         // surface *why* completions are empty instead of failing silently.
-        logger.info(
-            `[cds-plugin] no completions — model unavailable: ${result.error}`,
-        );
+        logger.info(`[cds-plugin] no completions — model unavailable: ${result.error}`);
         return null;
     }
     if (!result?.completions?.length) return null;
@@ -63,15 +45,15 @@ function getCqlCompletions(
         const isEntity = c.kind === 'entity' || c.kind === 'view';
         return {
             name: c.label,
-            kind:
-                c.kind === 'field'
-                    ? typescript.ScriptElementKind.memberVariableElement
-                    : typescript.ScriptElementKind.classElement,
+            kind: c.kind === 'field' ? typescript.ScriptElementKind.memberVariableElement : typescript.ScriptElementKind.classElement,
             kindModifiers: '',
             sortText: '0_' + c.label,
             labelDetails: c.detail ? { detail: `: ${c.detail}` } : undefined,
             ...(isEntity && !prefix
-                ? /** @type {{ hasAction: true; source: string }} */ ({ hasAction: true, source: `cds:${c.detail}` })
+                ? /** @type {{ hasAction: true; source: string }} */ ({
+                      hasAction: true,
+                      source: `cds:${c.detail}`,
+                  })
                 : {}),
         };
     });
@@ -97,14 +79,7 @@ function getCqlCompletions(
  * @param {TS} typescript
  * @returns {import('typescript').CompletionEntryDetails | null}
  */
-function getCqlCompletionDetails(
-    fileName,
-    position,
-    entryName,
-    source,
-    ctx,
-    typescript,
-) {
+function getCqlCompletionDetails(fileName, position, entryName, source, ctx, typescript) {
     if (!source?.startsWith('cds:')) return null;
 
     const { origText, origSf } = ctx;
@@ -112,12 +87,10 @@ function getCqlCompletionDetails(
     const template = findCdsQueryTemplate(typescript, origSf, position);
     if (!template) return null;
 
-    const stmt =
-        findAncestor(template, typescript.isVariableStatement) ?? template;
+    const stmt = findAncestor(template, typescript.isVariableStatement) ?? template;
     const stmtStart = stmt.getStart(origSf);
     const lineStart = origText.lastIndexOf('\n', stmtStart - 1) + 1;
-    const indent =
-        origText.slice(lineStart, stmtStart).match(/^(\s*)/)?.[1] ?? '';
+    const indent = origText.slice(lineStart, stmtStart).match(/^(\s*)/)?.[1] ?? '';
 
     const fqn = source.slice(4);
     // The service prefix is the FQN minus its last segment (the entity name).
@@ -142,9 +115,7 @@ function getCqlCompletionDetails(
                 changes: [
                     {
                         fileName,
-                        textChanges: [
-                            { span: insertionSpan, newText: annotation },
-                        ],
+                        textChanges: [{ span: insertionSpan, newText: annotation }],
                     },
                 ],
             },

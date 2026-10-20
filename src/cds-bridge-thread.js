@@ -47,8 +47,7 @@
 const { workerData, parentPort } = require('node:worker_threads');
 const { spawn } = require('node:child_process');
 
-const { ctrl, reqBuf, resBuf, workerPath, projectRoot, nodeExec } =
-    workerData;
+const { ctrl, reqBuf, resBuf, workerPath, projectRoot, nodeExec } = workerData;
 
 const ctrlArr = new Int32Array(ctrl);
 const reqArr = new Uint8Array(reqBuf);

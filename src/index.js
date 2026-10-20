@@ -68,11 +68,7 @@ const DISK_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
  * @returns {string}
  */
 function diskCachePath(projectRoot, sourceText) {
-    const key = createHash('sha1')
-        .update(projectRoot)
-        .update('\0')
-        .update(sourceText)
-        .digest('hex');
+    const key = createHash('sha1').update(projectRoot).update('\0').update(sourceText).digest('hex');
     return join(tmpdir(), `cds-lsp-rewrite-${key}.json`);
 }
 
@@ -141,10 +137,7 @@ class PersistentWorkerPool {
      * @param {import('typescript').server.Logger} logger
      * @returns {BridgeHandle}
      */
-    getOrCreate(
-        projectRoot,
-        logger,
-    ) {
+    getOrCreate(projectRoot, logger) {
         const existing = this.bridges.get(projectRoot);
         if (existing) return existing;
 
@@ -152,22 +145,18 @@ class PersistentWorkerPool {
         const reqBuf = new SharedArrayBuffer(4 + IPC_BUF_SIZE);
         const resBuf = new SharedArrayBuffer(4 + IPC_BUF_SIZE);
 
-        const thread = new WorkerThread(
-            _TEST_OVERRIDES.bridgeThreadPath ?? BRIDGE_THREAD_PATH,
-            {
-                workerData: {
-                    ctrl,
-                    reqBuf,
-                    resBuf,
-                    workerPath: _TEST_OVERRIDES.workerPath ?? WORKER_PATH,
-                    projectRoot,
-                    nodeExec: process.execPath,
-                },
+        const thread = new WorkerThread(_TEST_OVERRIDES.bridgeThreadPath ?? BRIDGE_THREAD_PATH, {
+            workerData: {
+                ctrl,
+                reqBuf,
+                resBuf,
+                workerPath: _TEST_OVERRIDES.workerPath ?? WORKER_PATH,
+                projectRoot,
+                nodeExec: process.execPath,
             },
-        );
+        });
         thread.on('message', (msg) => {
-            if (msg.type === 'stderr')
-                logger.info(`[cds-plugin] worker stderr: ${msg.text}`);
+            if (msg.type === 'stderr') logger.info(`[cds-plugin] worker stderr: ${msg.text}`);
         });
         thread.on('error', (err) => {
             logger.info(`[cds-plugin] bridge error: ${err.message}`);
@@ -186,9 +175,7 @@ class PersistentWorkerPool {
 
         const handle = { thread, ctrl, reqBuf, resBuf };
         this.bridges.set(projectRoot, handle);
-        logger.info(
-            `[cds-plugin] spawned persistent worker for ${projectRoot}`,
-        );
+        logger.info(`[cds-plugin] spawned persistent worker for ${projectRoot}`);
         return handle;
     }
 
@@ -199,12 +186,7 @@ class PersistentWorkerPool {
      * @param {number} [timeoutMs]
      * @returns {unknown | null}
      */
-    call(
-        projectRoot,
-        req,
-        logger,
-        timeoutMs = 5000,
-    ) {
+    call(projectRoot, req, logger, timeoutMs = 5000) {
         try {
             const h = this.getOrCreate(projectRoot, logger);
             const ctrlArr = new Int32Array(h.ctrl);
@@ -230,22 +212,16 @@ class PersistentWorkerPool {
                 return null;
             }
             if (Atomics.load(ctrlArr, 2) === 1) {
-                logger.info(
-                    '[cds-plugin] persistent worker exited unexpectedly',
-                );
+                logger.info('[cds-plugin] persistent worker exited unexpectedly');
                 this.bridges.delete(projectRoot);
                 return null;
             }
             const len = new DataView(h.resBuf).getInt32(0, true);
-            const resJson = Buffer.from(
-                new Uint8Array(h.resBuf, 4, len),
-            ).toString('utf8');
+            const resJson = Buffer.from(new Uint8Array(h.resBuf, 4, len)).toString('utf8');
             const parsed = JSON.parse(resJson);
             return parsed?.result ?? null;
         } catch (e) {
-            logger.info(
-                `[cds-plugin] persistent worker error: ${e instanceof Error ? e.message : String(e)}`,
-            );
+            logger.info(`[cds-plugin] persistent worker error: ${e instanceof Error ? e.message : String(e)}`);
             this.bridges.delete(projectRoot);
             return null;
         }
@@ -290,17 +266,8 @@ const WORKER_POOL = new PersistentWorkerPool();
  * @param {number} [timeoutMs]
  * @returns {WorkerResult | null}
  */
-function runWorker(
-    args,
-    logger,
-    timeoutMs,
-) {
-    const r = WORKER_POOL.call(
-        args[0] ?? '',
-        { kind: 'single', args: args.slice(1) },
-        logger,
-        timeoutMs,
-    );
+function runWorker(args, logger, timeoutMs) {
+    const r = WORKER_POOL.call(args[0] ?? '', { kind: 'single', args: args.slice(1) }, logger, timeoutMs);
     return /** @type {WorkerResult | null} */ (r);
 }
 
@@ -310,11 +277,7 @@ function runWorker(
  * @param {import('typescript').server.Logger} logger
  * @returns {BatchProbeResult | null}
  */
-function runBatchWorker(
-    projectRoot,
-    probes,
-    logger,
-) {
+function runBatchWorker(projectRoot, probes, logger) {
     const r = WORKER_POOL.call(projectRoot, { kind: 'batch', probes }, logger);
     return /** @type {BatchProbeResult | null} */ (r);
 }
@@ -372,36 +335,21 @@ const pluginFactory = ({ typescript }) => {
             const ls = info.languageService;
             const project = info.project;
             logger = info.project.projectService.logger;
-            config = readConfig(
-                (info.config ?? {}),
-            );
+            config = readConfig(info.config ?? {});
 
             // Resolve the CQL query context for a file — the same 8-arg call is
             // needed by every feature proxy method below.
             const ctxFor = (/** @type {string} */ fileName) =>
-                resolveQueryContext(
-                    fileName,
-                    info,
-                    typescript,
-                    originalSource,
-                    rw,
-                    rwBatch,
-                    logger ?? info.project.projectService.logger,
-                    projectRootFor(fileName),
-                );
+                resolveQueryContext(fileName, info, typescript, originalSource, rw, rwBatch, logger ?? info.project.projectService.logger, projectRootFor(fileName));
 
             /**
              * @param {CdsPatchedScriptInfo | null} [si]
              * @returns {void}
              */
-            function triggerTsServerRefresh(
-                si,
-            ) {
-                if (si && typeof si.editContent === 'function')
-                    si.editContent(0, 0, '');
+            function triggerTsServerRefresh(si) {
+                if (si && typeof si.editContent === 'function') si.editContent(0, 0, '');
                 info.project.updateGraph();
-                if (typeof project.refreshDiagnostics === 'function')
-                    project.refreshDiagnostics();
+                if (typeof project.refreshDiagnostics === 'function') project.refreshDiagnostics();
             }
 
             /** @type {Map<string, { sourceText: string; rewritten: string }>} */
@@ -445,8 +393,7 @@ const pluginFactory = ({ typescript }) => {
             /** @type {RunWorker} */
             const rw = _TEST_OVERRIDES.rw ?? runWorker;
             /** @type {RunBatchWorker} */
-            const rwBatch =
-                _TEST_OVERRIDES.rwBatch ?? runBatchWorker;
+            const rwBatch = _TEST_OVERRIDES.rwBatch ?? runBatchWorker;
 
             /**
              * @param {string} fileName
@@ -468,15 +415,10 @@ const pluginFactory = ({ typescript }) => {
              * @param {string} sourceText
              * @returns {string}
              */
-            function doRewriteImpl(
-                fileName,
-                sourceText,
-            ) {
+            function doRewriteImpl(fileName, sourceText) {
                 // All three rewriteSnapshot call sites below share the same 9
                 // closure-captured args and differ only in the final opts object.
-                const rewrite = (
-                    /** @type {{ typeExprCache?: Map<string, string>; cacheOnly?: boolean } | undefined} */ opts,
-                ) =>
+                const rewrite = (/** @type {{ typeExprCache?: Map<string, string>; cacheOnly?: boolean } | undefined} */ opts) =>
                     rewriteSnapshot(
                         fileName,
                         sourceText,
@@ -494,8 +436,7 @@ const pluginFactory = ({ typescript }) => {
 
                 // Fast path: cache hit — source unchanged since last full rewrite
                 const cached = rewriteCache.get(fileName);
-                if (cached && cached.sourceText === sourceText)
-                    return cached.rewritten;
+                if (cached && cached.sourceText === sourceText) return cached.rewritten;
 
                 const entry = debounceMap.get(fileName);
                 clearTimeout(entry?.timer);
@@ -514,8 +455,7 @@ const pluginFactory = ({ typescript }) => {
                             rewritten: hit.rewritten,
                         });
                         originalSource.set(fileName, sourceText);
-                        if (hit.ranges.length)
-                            rewrittenRanges.set(fileName, hit.ranges);
+                        if (hit.ranges.length) rewrittenRanges.set(fileName, hit.ranges);
                         debounceMap.set(fileName, {
                             timer: undefined,
                             lastRewritten: hit.rewritten,
@@ -581,11 +521,7 @@ const pluginFactory = ({ typescript }) => {
                     const fresh = rewrite({ typeExprCache });
                     const si = debounceMap.get(fileName)?.scriptInfo ?? null;
                     // Only update lastRewritten on success; on worker miss keep the last good rewrite
-                    const newLastRewritten =
-                        fresh !== sourceText
-                            ? fresh
-                            : (debounceMap.get(fileName)?.lastRewritten ??
-                              fresh);
+                    const newLastRewritten = fresh !== sourceText ? fresh : (debounceMap.get(fileName)?.lastRewritten ?? fresh);
                     debounceMap.set(fileName, {
                         timer,
                         lastRewritten: newLastRewritten,
@@ -593,14 +529,11 @@ const pluginFactory = ({ typescript }) => {
                     });
                     // Persist updated rewrite to disk for fast reload next time (skip on miss)
                     if (fresh !== sourceText) {
-                        writeDiskCache(
-                            diskCachePath(projectRootFor(fileName), sourceText),
-                            {
-                                rewritten: fresh,
-                                ranges: rewrittenRanges.get(fileName) ?? [],
-                                writtenAt: Date.now(),
-                            },
-                        );
+                        writeDiskCache(diskCachePath(projectRootFor(fileName), sourceText), {
+                            rewritten: fresh,
+                            ranges: rewrittenRanges.get(fileName) ?? [],
+                            writtenAt: Date.now(),
+                        });
                     }
                     triggerTsServerRefresh(si);
                 }, debounceMs);
@@ -615,27 +548,12 @@ const pluginFactory = ({ typescript }) => {
             }
 
             // Patch languageServiceHost (closed/background files)
-            const origGetScriptSnapshot =
-                info.languageServiceHost.getScriptSnapshot.bind(
-                    info.languageServiceHost,
-                );
+            const origGetScriptSnapshot = info.languageServiceHost.getScriptSnapshot.bind(info.languageServiceHost);
             info.languageServiceHost.getScriptSnapshot = (fileName) => {
                 const base = origGetScriptSnapshot(fileName);
-                if (
-                    !(
-                        base &&
-                        /\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/.test(fileName)
-                    )
-                )
-                    return base;
+                if (!(base && /\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/.test(fileName))) return base;
                 const sourceText = base.getText(0, base.getLength());
-                if (
-                    !(
-                        sourceText.includes('cds.ql') &&
-                        config['cds.ql.typeInference']
-                    )
-                )
-                    return base;
+                if (!(sourceText.includes('cds.ql') && config['cds.ql.typeInference'])) return base;
                 originalSource.set(fileName, sourceText);
                 const rewritten = doRewrite(fileName, sourceText);
                 if (rewritten === sourceText) return base;
@@ -652,19 +570,14 @@ const pluginFactory = ({ typescript }) => {
              */
             function patchScriptInfo(fileName) {
                 if (patchedFiles.has(fileName)) return;
-                const scriptInfo = info.project.getScriptInfo(
-                    fileName,
-                );
+                const scriptInfo = info.project.getScriptInfo(fileName);
                 if (!scriptInfo) {
                     // tsserver has not assigned this file to a project, so the plugin cannot
                     // attach its snapshot rewrite. For a loose .js file with no tsconfig/jsconfig
                     // this usually means the vscode-cds extension needs to register the plugin
                     // with `enableForWorkspaceTypeScriptVersions` and activate TS features for
                     // JavaScript (onLanguage:javascript). Surface it once as an actionable hint.
-                    if (
-                        /\.(js|jsx|mjs|cjs|ts|tsx)$/.test(fileName) &&
-                        !unassignedWarned.has(fileName)
-                    ) {
+                    if (/\.(js|jsx|mjs|cjs|ts|tsx)$/.test(fileName) && !unassignedWarned.has(fileName)) {
                         unassignedWarned.add(fileName);
                         logger?.info(
                             `[cds-plugin] ${fileName.split('/').pop()} is not assigned to a TS project — CQL features inactive. If this is a loose .js/.ts file, check that the vscode-cds extension registers @sap/cds-lsp with enableForWorkspaceTypeScriptVersions and activates on JavaScript/TypeScript.`,
@@ -683,23 +596,13 @@ const pluginFactory = ({ typescript }) => {
              * @param {boolean} [triggerUpdate]
              * @returns {void}
              */
-            function patchScriptInfoImpl(
-                scriptInfo,
-                fileName,
-                triggerUpdate = true,
-            ) {
+            function patchScriptInfoImpl(scriptInfo, fileName, triggerUpdate = true) {
                 const origSnap = scriptInfo.getSnapshot.bind(scriptInfo);
                 scriptInfo.__cdsOrigSnap = origSnap;
                 scriptInfo.getSnapshot = () => {
                     const base = origSnap();
                     const sourceText = base.getText(0, base.getLength());
-                    if (
-                        !(
-                            sourceText.includes('cds.ql') &&
-                            config['cds.ql.typeInference']
-                        )
-                    )
-                        return base;
+                    if (!(sourceText.includes('cds.ql') && config['cds.ql.typeInference'])) return base;
                     originalSource.set(fileName, sourceText);
                     const rewritten = doRewrite(fileName, sourceText);
                     if (rewritten === sourceText) return base;
@@ -713,9 +616,7 @@ const pluginFactory = ({ typescript }) => {
                     lastRewritten: existing?.lastRewritten ?? '',
                     scriptInfo,
                 });
-                logger?.info(
-                    `[cds-plugin] patched ScriptInfo for ${fileName.split('/').pop()}`,
-                );
+                logger?.info(`[cds-plugin] patched ScriptInfo for ${fileName.split('/').pop()}`);
                 if (triggerUpdate) {
                     // A zero-length edit bumps the ScriptInfo's internal version counter so
                     // isProgramUptoDate() returns false and tsserver rebuilds the program with
@@ -730,13 +631,7 @@ const pluginFactory = ({ typescript }) => {
             for (const k of Object.keys(ls)) {
                 const method = _ls[k];
                 if (typeof method === 'function') {
-                    _proxy[k] = (
-                        /** @type {unknown[]} */ ...args
-                    ) =>
-                        method.apply(
-                            ls,
-                            args,
-                        );
+                    _proxy[k] = (/** @type {unknown[]} */ ...args) => method.apply(ls, args);
                 }
             }
 
@@ -748,15 +643,10 @@ const pluginFactory = ({ typescript }) => {
             if (typeof project.updateGraph === 'function') {
                 const origUpdateGraph = project.updateGraph.bind(info.project);
                 project.updateGraph = () => {
-                    if (
-                        config['cds.ql.typeInference'] &&
-                        typeof project.getScriptFileNames === 'function'
-                    ) {
+                    if (config['cds.ql.typeInference'] && typeof project.getScriptFileNames === 'function') {
                         for (const fn of project.getScriptFileNames()) {
                             if (patchedFiles.has(fn)) continue;
-                            const si = /** @type {CdsPatchedScriptInfo | undefined} */ (info.project.getScriptInfo(
-                                fn,
-                            ));
+                            const si = /** @type {CdsPatchedScriptInfo | undefined} */ (info.project.getScriptInfo(fn));
                             if (!si || si.__cdsPatchedSnapshot) continue;
                             const snap = si.getSnapshot();
                             const text = snap.getText(0, snap.getLength());
@@ -782,22 +672,12 @@ const pluginFactory = ({ typescript }) => {
                 /** @type {string[]} */
                 const cdsFileNames = [];
                 for (const fileName of project.getScriptFileNames()) {
-                    const si = /** @type {CdsPatchedScriptInfo | undefined} */ (info.project.getScriptInfo(
-                        fileName,
-                    ));
+                    const si = /** @type {CdsPatchedScriptInfo | undefined} */ (info.project.getScriptInfo(fileName));
                     if (!si) continue;
                     const snap = si.__cdsOrigSnap?.() ?? si.getSnapshot();
                     const text = snap.getText(0, snap.getLength());
-                    if (
-                        text.includes('cds.ql') &&
-                        config['cds.ql.typeInference']
-                    ) {
-                        if (
-                            !(
-                                patchedFiles.has(fileName) ||
-                                si.__cdsPatchedSnapshot
-                            )
-                        ) {
+                    if (text.includes('cds.ql') && config['cds.ql.typeInference']) {
+                        if (!(patchedFiles.has(fileName) || si.__cdsPatchedSnapshot)) {
                             patchScriptInfoImpl(si, fileName, false);
                         }
                         cdsFileNames.push(fileName);
@@ -806,11 +686,8 @@ const pluginFactory = ({ typescript }) => {
                 if (cdsFileNames.length > 0) {
                     setImmediate(() => {
                         for (const fileName of cdsFileNames) {
-                            const si = info.project.getScriptInfo(
-                                fileName,
-                            );
-                            if (si && typeof si.editContent === 'function')
-                                si.editContent(0, 0, '');
+                            const si = info.project.getScriptInfo(fileName);
+                            if (si && typeof si.editContent === 'function') si.editContent(0, 0, '');
                         }
                         triggerTsServerRefresh();
                     });
@@ -830,71 +707,30 @@ const pluginFactory = ({ typescript }) => {
 
             // ── Completions ──────────────────────────────────────────────────
 
-            proxy.getCompletionsAtPosition = (
-                fileName,
-                position,
-                options,
-                formatSettings,
-            ) => {
+            proxy.getCompletionsAtPosition = (fileName, position, options, formatSettings) => {
                 patchScriptInfo(fileName);
-                const base = ls.getCompletionsAtPosition(
-                    fileName,
-                    position,
-                    options,
-                    formatSettings,
-                );
+                const base = ls.getCompletionsAtPosition(fileName, position, options, formatSettings);
                 if (!config['cds.ql.completion']) return base;
                 const ctx = ctxFor(fileName);
                 if (!ctx) return base;
-                const cds = getCqlCompletions(
-                    fileName,
-                    position,
-                    ctx,
-                    typescript,
-                );
+                const cds = getCqlCompletions(fileName, position, ctx, typescript);
                 if (!cds) return base;
                 if (!base) return cds;
                 return { ...base, entries: [...cds.entries, ...base.entries] };
             };
 
-            proxy.getCompletionEntryDetails = (
-                fileName,
-                position,
-                entryName,
-                formatOptions,
-                source,
-                preferences,
-                data,
-            ) => {
-                const base = ls.getCompletionEntryDetails(
-                    fileName,
-                    position,
-                    entryName,
-                    formatOptions,
-                    source,
-                    preferences,
-                    data,
-                );
+            proxy.getCompletionEntryDetails = (fileName, position, entryName, formatOptions, source, preferences, data) => {
+                const base = ls.getCompletionEntryDetails(fileName, position, entryName, formatOptions, source, preferences, data);
                 if (!config['cds.ql.completion']) return base;
                 if (!source?.startsWith('cds:')) return base;
                 const ctx = ctxFor(fileName);
                 if (!ctx) return base;
-                const cds = getCqlCompletionDetails(
-                    fileName,
-                    position,
-                    entryName,
-                    source,
-                    ctx,
-                    typescript,
-                );
+                const cds = getCqlCompletionDetails(fileName, position, entryName, source, ctx, typescript);
                 if (!cds) return base;
                 return {
                     ...base,
                     ...cds,
-                    codeActions: [
-                        ...(base?.codeActions ?? []),
-                        ...(cds.codeActions ?? []),
-                    ],
+                    codeActions: [...(base?.codeActions ?? []), ...(cds.codeActions ?? [])],
                 };
             };
 
@@ -927,9 +763,7 @@ const pluginFactory = ({ typescript }) => {
              * @returns {T}
              */
             function withOriginalSnapshot(fileName, fn) {
-                const si = /** @type {CdsPatchedScriptInfo | undefined} */ (info.project.getScriptInfo(
-                    fileName,
-                ));
+                const si = /** @type {CdsPatchedScriptInfo | undefined} */ (info.project.getScriptInfo(fileName));
                 const origSnap = si?.__cdsOrigSnap;
                 if (!(si && origSnap && si.__cdsPatchedSnapshot)) return fn();
                 const patchedSnap = si.getSnapshot.bind(si);
@@ -957,9 +791,7 @@ const pluginFactory = ({ typescript }) => {
                 // The original text the current classified snapshot was built from. This
                 // is the source doRewrite last SERVED (the live buffer at that moment),
                 // which may be a live-aligned cacheOnly partial not written to rewriteCache.
-                const stale =
-                    servedSource.get(fileName) ??
-                    rewriteCache.get(fileName)?.sourceText;
+                const stale = servedSource.get(fileName) ?? rewriteCache.get(fileName)?.sourceText;
                 if (stale === undefined) return null;
                 const live = liveBufferOf(fileName);
                 if (live === undefined) return null;
@@ -972,9 +804,7 @@ const pluginFactory = ({ typescript }) => {
              */
             const liveBufferOf = (fileName) =>
                 withOriginalSnapshot(fileName, () => {
-                    const si = info.project.getScriptInfo(
-                        fileName,
-                    );
+                    const si = info.project.getScriptInfo(fileName);
                     const snap = si?.getSnapshot();
                     return snap ? snap.getText(0, snap.getLength()) : undefined;
                 });
@@ -987,21 +817,13 @@ const pluginFactory = ({ typescript }) => {
              * @param {string} live
              * @returns {SpliceEdit | null}
              */
-            function spliceDiff(
-                stale,
-                live,
-            ) {
+            function spliceDiff(stale, live) {
                 if (live === stale) return null;
                 const min = Math.min(stale.length, live.length);
                 let prefix = 0;
                 while (prefix < min && stale[prefix] === live[prefix]) prefix++;
                 let suffix = 0;
-                while (
-                    suffix < min - prefix &&
-                    stale[stale.length - 1 - suffix] ===
-                        live[live.length - 1 - suffix]
-                )
-                    suffix++;
+                while (suffix < min - prefix && stale[stale.length - 1 - suffix] === live[live.length - 1 - suffix]) suffix++;
                 return {
                     prefix,
                     staleSuffixStart: stale.length - suffix,
@@ -1023,22 +845,12 @@ const pluginFactory = ({ typescript }) => {
              * @param {SpliceEdit | null} staleEdit
              * @returns {{ spans: number[]; endOfLineState: number }}
              */
-            function filterSemanticClassifications(
-                base,
-                ranges,
-                origLength,
-                staleEdit,
-            ) {
+            function filterSemanticClassifications(base, ranges, origLength, staleEdit) {
                 const out = /** @type {number[]} */ ([]);
                 for (let i = 0; i < base.spans.length; i += 3) {
                     const tokStart = /** @type {number} */ (base.spans[i]);
                     if (tokStart >= origLength) continue;
-                    if (
-                        ranges?.some(
-                            (r) => tokStart >= r.start && tokStart < r.end,
-                        )
-                    )
-                        continue;
+                    if (ranges?.some((r) => tokStart >= r.start && tokStart < r.end)) continue;
 
                     let projected = tokStart;
                     if (staleEdit) {
@@ -1068,23 +880,15 @@ const pluginFactory = ({ typescript }) => {
              * @param {SpliceEdit | null} edit
              * @returns {{ spans: number[]; endOfLineState: number }}
              */
-            function reprojectFiltered(
-                cached,
-                edit,
-            ) {
+            function reprojectFiltered(cached, edit) {
                 if (!edit) return cached;
                 const out = /** @type {number[]} */ ([]);
                 for (let i = 0; i < cached.spans.length; i += 3) {
                     const tokStart = /** @type {number} */ (cached.spans[i]);
                     let projected = tokStart;
-                    if (tokStart >= edit.staleSuffixStart)
-                        projected = tokStart + edit.delta;
+                    if (tokStart >= edit.staleSuffixStart) projected = tokStart + edit.delta;
                     else if (tokStart >= edit.prefix) continue; // inside the edit — unknown
-                    out.push(
-                        projected,
-                        /** @type {number} */ (cached.spans[i + 1]),
-                        /** @type {number} */ (cached.spans[i + 2]),
-                    );
+                    out.push(projected, /** @type {number} */ (cached.spans[i + 1]), /** @type {number} */ (cached.spans[i + 2]));
                 }
                 return { spans: out, endOfLineState: cached.endOfLineState };
             }
@@ -1094,18 +898,12 @@ const pluginFactory = ({ typescript }) => {
                 // If this file has been rewritten, classify the original source so the
                 // template literal content gets correct syntax highlighting.
                 if (rewrittenRanges.has(fileName)) {
-                    return withOriginalSnapshot(fileName, () =>
-                        ls.getEncodedSyntacticClassifications(fileName, span),
-                    );
+                    return withOriginalSnapshot(fileName, () => ls.getEncodedSyntacticClassifications(fileName, span));
                 }
                 return ls.getEncodedSyntacticClassifications(fileName, span);
             };
 
-            proxy.getEncodedSemanticClassifications = (
-                fileName,
-                span,
-                format,
-            ) => {
+            proxy.getEncodedSemanticClassifications = (fileName, span, format) => {
                 patchScriptInfo(fileName);
 
                 const live = liveBufferOf(fileName);
@@ -1113,9 +911,7 @@ const pluginFactory = ({ typescript }) => {
                 // live buffer. Only then is the type environment the classifier sees the
                 // real one; otherwise it's a partial/stale snapshot whose whole-file
                 // inference would recolour unrelated identifiers (the semantic-value flash).
-                const fullyResolved =
-                    live !== undefined &&
-                    rewriteCache.get(fileName)?.sourceText === live;
+                const fullyResolved = live !== undefined && rewriteCache.get(fileName)?.sourceText === live;
 
                 // Key the freeze cache by file + span START + format. VS Code requests the
                 // whole document with a span whose LENGTH tracks the (changing) document
@@ -1130,16 +926,7 @@ const pluginFactory = ({ typescript }) => {
                     // tokens (cast ranges + tail aliases), and freeze the result as the
                     // last-good baseline for this range. No reprojection needed — the served
                     // snapshot IS the live buffer.
-                    const filtered = filterSemanticClassifications(
-                        ls.getEncodedSemanticClassifications(
-                            fileName,
-                            span,
-                            format,
-                        ),
-                        rewrittenRanges.get(fileName),
-                        live.length,
-                        null,
-                    );
+                    const filtered = filterSemanticClassifications(ls.getEncodedSemanticClassifications(fileName, span, format), rewrittenRanges.get(fileName), live.length, null);
                     lastGoodSemantic.set(cacheKey, {
                         source: live,
                         result: filtered,
@@ -1151,35 +938,16 @@ const pluginFactory = ({ typescript }) => {
                 // the live buffer so colours stay frozen until a full rewrite lands. This
                 // covers BOTH position drift and semantic-value changes (e.g. `cds` teal→
                 // mint), because we never re-run the classifier against a degraded snapshot.
-                const good =
-                    live !== undefined
-                        ? lastGoodSemantic.get(cacheKey)
-                        : undefined;
+                const good = live !== undefined ? lastGoodSemantic.get(cacheKey) : undefined;
                 if (good && live !== undefined) {
-                    return reprojectFiltered(
-                        good.result,
-                        spliceDiff(good.source, live),
-                    );
+                    return reprojectFiltered(good.result, spliceDiff(good.source, live));
                 }
 
                 // No last-good baseline yet (first classification before any full rewrite):
                 // fall back to filtering+reprojecting the current (possibly partial) snapshot.
                 const staleEdit = computeStaleEdit(fileName);
-                const staleOrigLength =
-                    servedSource.get(fileName)?.length ??
-                    rewriteCache.get(fileName)?.sourceText.length ??
-                    originalSource.get(fileName)?.length ??
-                    Number.POSITIVE_INFINITY;
-                return filterSemanticClassifications(
-                    ls.getEncodedSemanticClassifications(
-                        fileName,
-                        span,
-                        format,
-                    ),
-                    rewrittenRanges.get(fileName),
-                    staleOrigLength,
-                    staleEdit,
-                );
+                const staleOrigLength = servedSource.get(fileName)?.length ?? rewriteCache.get(fileName)?.sourceText.length ?? originalSource.get(fileName)?.length ?? Number.POSITIVE_INFINITY;
+                return filterSemanticClassifications(ls.getEncodedSemanticClassifications(fileName, span, format), rewrittenRanges.get(fileName), staleOrigLength, staleEdit);
             };
 
             return proxy;
@@ -1190,9 +958,7 @@ const pluginFactory = ({ typescript }) => {
             // `schemaVersion` tag from the host). Never throw here.
             config = readConfig(newConfig);
             const schema = newConfig?.['schemaVersion'];
-            logger?.info(
-                `[cds-plugin] config updated${schema !== undefined ? ` (schema ${String(schema)})` : ''}: ${JSON.stringify(config)}`,
-            );
+            logger?.info(`[cds-plugin] config updated${schema !== undefined ? ` (schema ${String(schema)})` : ''}: ${JSON.stringify(config)}`);
         },
     };
 };

@@ -2,9 +2,29 @@
 const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
 
-const { cdsTypeToTs, resolveBaseType, extractSourceRelations, getCursorClause, getTokenContext, getSuggestions, parseCqlColumns, tokenizeCql, validateCqlQuery, CqlDiagnosticCode } = require('../src/CqlLogic');
+const {
+    cdsTypeToTs,
+    resolveBaseType,
+    extractSourceRelations,
+    getCursorClause,
+    getTokenContext,
+    getSuggestions,
+    parseCqlColumns,
+    tokenizeCql,
+    validateCqlQuery,
+    CqlDiagnosticCode,
+} = require('../src/CqlLogic');
 /** @typedef {import('../src/CqlLogic').CqlSource} CqlSource */
-const { buildTypeString, collectCqlAssignments, extractTemplateText, fieldTokenAtOffset, findCdsQueryTemplate, offsetInTemplate, rewriteSnapshot, resolveToCdsQuery } = require('../src/CqlTypeRewriter');
+const {
+    buildTypeString,
+    collectCqlAssignments,
+    extractTemplateText,
+    fieldTokenAtOffset,
+    findCdsQueryTemplate,
+    offsetInTemplate,
+    rewriteSnapshot,
+    resolveToCdsQuery,
+} = require('../src/CqlTypeRewriter');
 const { getCqlCompletions, getCqlCompletionDetails } = require('../src/CqlCompletions');
 const { getCqlHover } = require('../src/CqlHover');
 const { getCqlDiagnostics } = require('../src/CqlDiagnostics');
@@ -29,35 +49,24 @@ function withCursor(template) {
 }
 
 /** Minimal CDS model definitions object for tests. */
-function defs(
-    entities,
-) {
+function defs(entities) {
     const result = {};
     for (const [fqn, elements] of Object.entries(entities)) {
         const kind = fqn.includes('View') ? 'view' : 'entity';
         result[fqn] = {
             kind,
-            elements: Object.fromEntries(
-                Object.entries(elements).map(([name, type]) => [
-                    name,
-                    { type },
-                ]),
-            ),
+            elements: Object.fromEntries(Object.entries(elements).map(([name, type]) => [name, { type }])),
         };
     }
     return result;
 }
 
 function includesAll(arr, members) {
-    for (const m of members)
-        assert.ok(arr.includes(m), `expected "${m}" in [${arr.join(', ')}]`);
+    for (const m of members) assert.ok(arr.includes(m), `expected "${m}" in [${arr.join(', ')}]`);
 }
 
 function excludes(arr, item) {
-    assert.ok(
-        !arr.includes(item),
-        `expected "${item}" to not be in [${arr.join(', ')}]`,
-    );
+    assert.ok(!arr.includes(item), `expected "${item}" to not be in [${arr.join(', ')}]`);
 }
 
 // ---------------------------------------------------------------------------
@@ -67,15 +76,8 @@ function excludes(arr, item) {
 describe('tokenizeCql', () => {
     it('tokenizes a simple SELECT query', () => {
         const tokens = tokenizeCql('SELECT id FROM Books');
-        const sig = tokens
-            .filter((t) => t.kind !== 'whitespace')
-            .map((t) => `${t.kind}:${t.value}`);
-        assert.deepEqual(sig, [
-            'keyword:SELECT',
-            'identifier:id',
-            'keyword:FROM',
-            'identifier:Books',
-        ]);
+        const sig = tokens.filter((t) => t.kind !== 'whitespace').map((t) => `${t.kind}:${t.value}`);
+        assert.deepEqual(sig, ['keyword:SELECT', 'identifier:id', 'keyword:FROM', 'identifier:Books']);
     });
 
     it('assigns correct offsets', () => {
@@ -87,9 +89,7 @@ describe('tokenizeCql', () => {
 
     it('classifies keywords case-insensitively', () => {
         const tokens = tokenizeCql('select id from books');
-        const kws = tokens
-            .filter((t) => t.kind === 'keyword')
-            .map((t) => t.value);
+        const kws = tokens.filter((t) => t.kind === 'keyword').map((t) => t.value);
         assert.deepEqual(kws, ['select', 'from']);
     });
 
@@ -110,9 +110,7 @@ describe('tokenizeCql', () => {
 
     it('handles multi-char operators', () => {
         const tokens = tokenizeCql('a <> b != c <= d >= e');
-        const ops = tokens
-            .filter((t) => t.kind === 'operator')
-            .map((t) => t.value);
+        const ops = tokens.filter((t) => t.kind === 'operator').map((t) => t.value);
         assert.deepEqual(ops, ['<>', '!=', '<=', '>=']);
     });
 
@@ -124,34 +122,18 @@ describe('tokenizeCql', () => {
 
     it('strips // line comments', () => {
         const tokens = tokenizeCql('SELECT id // pick id\nFROM Books');
-        const sig = tokens
-            .filter((t) => t.kind !== 'whitespace')
-            .map((t) => t.kind);
-        assert.deepEqual(sig, [
-            'keyword',
-            'identifier',
-            'keyword',
-            'identifier',
-        ]);
+        const sig = tokens.filter((t) => t.kind !== 'whitespace').map((t) => t.kind);
+        assert.deepEqual(sig, ['keyword', 'identifier', 'keyword', 'identifier']);
     });
 
     it('strips block comments', () => {
         const tokens = tokenizeCql('SELECT /* all */ id FROM Books');
-        const sig = tokens
-            .filter((t) => t.kind !== 'whitespace')
-            .map((t) => `${t.kind}:${t.value}`);
-        assert.deepEqual(sig, [
-            'keyword:SELECT',
-            'identifier:id',
-            'keyword:FROM',
-            'identifier:Books',
-        ]);
+        const sig = tokens.filter((t) => t.kind !== 'whitespace').map((t) => `${t.kind}:${t.value}`);
+        assert.deepEqual(sig, ['keyword:SELECT', 'identifier:id', 'keyword:FROM', 'identifier:Books']);
     });
 
     it('handles single-quoted string literals', () => {
-        const tokens = tokenizeCql(
-            "SELECT id FROM Books WHERE title = 'Hello'",
-        );
+        const tokens = tokenizeCql("SELECT id FROM Books WHERE title = 'Hello'");
         const str = tokens.find((t) => t.kind === 'string');
         assert.ok(str, 'expected a string token');
         assert.equal(str.value, "'Hello'");
@@ -170,9 +152,7 @@ describe('tokenizeCql', () => {
 
 describe('extractSourceRelations', () => {
     function sources(query) {
-        const sig = tokenizeCql(query).filter(
-            (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-        );
+        const sig = tokenizeCql(query).filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
         return extractSourceRelations(sig);
     }
 
@@ -204,9 +184,7 @@ describe('extractSourceRelations', () => {
     });
 
     it('extracts multiple JOIN sources with aliases', () => {
-        const result = sources(
-            'SELECT A.id FROM Authors AS A JOIN Books AS B ON A.id = B.authorId',
-        );
+        const result = sources('SELECT A.id FROM Authors AS A JOIN Books AS B ON A.id = B.authorId');
         assert.equal(result.length, 2);
         assert.equal(result[0].entity, 'Authors');
         assert.equal(result[0].ref, 'A');
@@ -225,9 +203,7 @@ describe('extractSourceRelations', () => {
     });
 
     it('ignores sources inside subqueries', () => {
-        const result = sources(
-            'SELECT id FROM Books WHERE id IN (SELECT id FROM Authors)',
-        );
+        const result = sources('SELECT id FROM Books WHERE id IN (SELECT id FROM Authors)');
         assert.equal(result.length, 1);
         assert.equal(result[0].entity, 'Books');
     });
@@ -252,10 +228,7 @@ describe('getCursorClause', () => {
     }
 
     it('returns select-item when cursor is in SELECT list', () => {
-        assert.equal(
-            clause('SELECT id, |title FROM Books').kind,
-            'select-item',
-        );
+        assert.equal(clause('SELECT id, |title FROM Books').kind, 'select-item');
     });
 
     it('select-item carries source entity and ref when FROM precedes cursor', () => {
@@ -289,19 +262,13 @@ describe('getCursorClause', () => {
     it('returns where-expr when cursor is in WHERE clause', () => {
         const result = clause('SELECT id FROM Books WHERE |');
         assert.equal(result.kind, 'where-expr');
-        assert.equal(
-            result.sources[0].entity,
-            'Books',
-        );
+        assert.equal(result.sources[0].entity, 'Books');
     });
 
     it('returns order-by for ORDER BY', () => {
         const result = clause('SELECT id FROM Books ORDER BY |');
         assert.equal(result.kind, 'order-by');
-        assert.equal(
-            result.sources[0].entity,
-            'Books',
-        );
+        assert.equal(result.sources[0].entity, 'Books');
     });
 
     it('returns from-source after JOIN keyword', () => {
@@ -313,12 +280,7 @@ describe('getCursorClause', () => {
     });
 
     it('ignores clause keywords inside subqueries', () => {
-        assert.equal(
-            clause(
-                'SELECT | FROM Books WHERE id IN (SELECT id FROM Authors WHERE id > 1)',
-            ).kind,
-            'select-item',
-        );
+        assert.equal(clause('SELECT | FROM Books WHERE id IN (SELECT id FROM Authors WHERE id > 1)').kind, 'select-item');
     });
 
     it('where-expr with implicit alias — entity used as ref (implicit alias not captured by getCursorClause)', () => {
@@ -341,17 +303,13 @@ describe('getCursorClause', () => {
     it('expandPath uses the association name (not the alias) inside an aliased expand block', () => {
         // Regression: `address as residence { | }` must scope completions to the
         // association `address`, not the alias `residence`.
-        const result = clause(
-            'SELECT FROM Authors { name, address as residence { | } }',
-        );
+        const result = clause('SELECT FROM Authors { name, address as residence { | } }');
         assert.equal(result.kind, 'select-item');
         assert.deepEqual(result.expandPath, ['address']);
     });
 
     it('expandPath uses association names through nested aliased expands', () => {
-        const result = clause(
-            'SELECT FROM Authors { address as residence { town as city { | } } }',
-        );
+        const result = clause('SELECT FROM Authors { address as residence { town as city { | } } }');
         assert.equal(result.kind, 'select-item');
         assert.deepEqual(result.expandPath, ['address', 'town']);
     });
@@ -425,9 +383,7 @@ describe('getSuggestions — fields', () => {
     });
 
     it('suggests fields from all JOIN sources', () => {
-        const { query, cursor } = withCursor(
-            'SELECT | FROM Books JOIN Authors ON Books.ID = Authors.ID',
-        );
+        const { query, cursor } = withCursor('SELECT | FROM Books JOIN Authors ON Books.ID = Authors.ID');
         includesAll(
             getSuggestions(query, cursor, model, 'Svc').map((i) => i.label),
             ['title', 'name', 'age'],
@@ -458,11 +414,7 @@ describe('getSuggestions — fields', () => {
         };
         const { query, cursor } = withCursor('SELECT | FROM Books');
         const items = getSuggestions(query, cursor, noElemModel, 'Svc');
-        assert.deepEqual(
-            items,
-            [],
-            'entity with no elements must produce empty suggestions',
-        );
+        assert.deepEqual(items, [], 'entity with no elements must produce empty suggestions');
     });
 
     it('uses @description as doc when doc.val is absent', () => {
@@ -482,11 +434,7 @@ describe('getSuggestions — fields', () => {
         const items = getSuggestions(query, cursor, descModel, 'Svc');
         const titleEntry = items.find((i) => i.label === 'title');
         assert.ok(titleEntry, 'title must be in suggestions');
-        assert.equal(
-            titleEntry.doc,
-            'Book title',
-            '@description val must be used as doc',
-        );
+        assert.equal(titleEntry.doc, 'Book title', '@description val must be used as doc');
     });
 });
 
@@ -504,9 +452,7 @@ describe('getSuggestions — entities', () => {
 
     it('suggests local entity names for from-source', () => {
         const { query, cursor } = withCursor('SELECT id FROM |');
-        const labels = getSuggestions(query, cursor, model, 'Svc').map(
-            (i) => i.label,
-        );
+        const labels = getSuggestions(query, cursor, model, 'Svc').map((i) => i.label);
         includesAll(labels, ['Books', 'BooksView']);
         excludes(labels, 'Other.Books');
     });
@@ -555,33 +501,19 @@ describe('getTokenContext', () => {
 
     it('returns null when cursor is not on an identifier', () => {
         // cursor on the space between SELECT and id
-        assert.equal(
-            getTokenContext('SELECT id FROM Books', 6, model, 'Svc'),
-            null,
-        );
+        assert.equal(getTokenContext('SELECT id FROM Books', 6, model, 'Svc'), null);
     });
 
     it('identifies entity name directly after FROM', () => {
         const query = 'SELECT id FROM Books';
-        const result = getTokenContext(
-            query,
-            query.indexOf('Books'),
-            model,
-            'Svc',
-        );
+        const result = getTokenContext(query, query.indexOf('Books'), model, 'Svc');
         assert.equal(result?.kind, 'entity');
         assert.equal(result.fqn, 'Svc.Books');
     });
 
     it('identifies entity name after JOIN', () => {
-        const query =
-            'SELECT id FROM Books JOIN Authors ON Books.ID = Authors.ID';
-        const result = getTokenContext(
-            query,
-            query.indexOf('Authors'),
-            model,
-            'Svc',
-        );
+        const query = 'SELECT id FROM Books JOIN Authors ON Books.ID = Authors.ID';
+        const result = getTokenContext(query, query.indexOf('Authors'), model, 'Svc');
         assert.equal(result?.kind, 'entity');
         assert.equal(result.fqn, 'Svc.Authors');
     });
@@ -602,34 +534,19 @@ describe('getTokenContext', () => {
 
     it('identifies field in SELECT list as field kind', () => {
         const query = 'SELECT id FROM Books';
-        const result = getTokenContext(
-            query,
-            query.indexOf('id'),
-            model,
-            'Svc',
-        );
+        const result = getTokenContext(query, query.indexOf('id'), model, 'Svc');
         assert.equal(result?.kind, 'field');
     });
 
     it('identifies field in WHERE clause as field kind', () => {
         const query = 'SELECT id FROM Books WHERE title = 1';
-        const result = getTokenContext(
-            query,
-            query.indexOf('title'),
-            model,
-            'Svc',
-        );
+        const result = getTokenContext(query, query.indexOf('title'), model, 'Svc');
         assert.equal(result?.kind, 'field');
     });
 
     it('returns entity kind with raw value as fqn for unresolved entity', () => {
         const query = 'SELECT id FROM Unknown';
-        const result = getTokenContext(
-            query,
-            query.indexOf('Unknown'),
-            model,
-            'Svc',
-        );
+        const result = getTokenContext(query, query.indexOf('Unknown'), model, 'Svc');
         assert.equal(result?.kind, 'entity');
         assert.equal(result.fqn, 'Unknown');
     });
@@ -650,25 +567,15 @@ describe('validateCqlQuery', () => {
     });
 
     it('returns no errors for a valid query', () => {
-        assert.deepEqual(
-            validateCqlQuery('SELECT ID, title FROM Books', model, 'Svc'),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT ID, title FROM Books', model, 'Svc'), []);
     });
 
     it('returns no errors for SELECT *', () => {
-        assert.deepEqual(
-            validateCqlQuery('SELECT * FROM Books', model, 'Svc'),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT * FROM Books', model, 'Svc'), []);
     });
 
     it('reports unknown entity', () => {
-        const errs = validateCqlQuery(
-            'SELECT ID FROM NoSuchEntity',
-            model,
-            'Svc',
-        );
+        const errs = validateCqlQuery('SELECT ID FROM NoSuchEntity', model, 'Svc');
         assert.equal(errs.length, 1);
         assert.ok(errs[0].message.includes('NoSuchEntity'));
     });
@@ -692,11 +599,7 @@ describe('validateCqlQuery', () => {
     });
 
     it('reports ambiguous field present in multiple JOIN sources', () => {
-        const errs = validateCqlQuery(
-            'SELECT ID FROM Books JOIN Authors ON Books.ID = Authors.ID',
-            model,
-            'Svc',
-        );
+        const errs = validateCqlQuery('SELECT ID FROM Books JOIN Authors ON Books.ID = Authors.ID', model, 'Svc');
         assert.ok(
             errs.find((e) => e.message.includes('Ambiguous')),
             'expected ambiguity error for ID',
@@ -704,17 +607,11 @@ describe('validateCqlQuery', () => {
     });
 
     it('no error for qualified reference with alias', () => {
-        assert.deepEqual(
-            validateCqlQuery('SELECT A.ID FROM Authors AS A', model, 'Svc'),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT A.ID FROM Authors AS A', model, 'Svc'), []);
     });
 
     it('no error for qualified reference without alias', () => {
-        assert.deepEqual(
-            validateCqlQuery('SELECT Books.ID FROM Books', model, 'Svc'),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT Books.ID FROM Books', model, 'Svc'), []);
     });
 
     it('reports unknown source in qualified reference', () => {
@@ -726,11 +623,7 @@ describe('validateCqlQuery', () => {
     });
 
     it('reports unknown field on qualified source', () => {
-        const errs = validateCqlQuery(
-            'SELECT Books.ghost FROM Books',
-            model,
-            'Svc',
-        );
+        const errs = validateCqlQuery('SELECT Books.ghost FROM Books', model, 'Svc');
         assert.ok(
             errs.find((e) => e.message.includes("Unknown field 'ghost'")),
             'expected unknown field error',
@@ -738,37 +631,19 @@ describe('validateCqlQuery', () => {
     });
 
     it('respects prefix: uses annotation service for entity lookup', () => {
-        assert.deepEqual(
-            validateCqlQuery('SELECT ID FROM Books', model, 'Svc'),
-            [],
-        );
-        const errs = validateCqlQuery(
-            'SELECT ID FROM Books',
-            model,
-            'WrongSvc',
-        );
+        assert.deepEqual(validateCqlQuery('SELECT ID FROM Books', model, 'Svc'), []);
+        const errs = validateCqlQuery('SELECT ID FROM Books', model, 'WrongSvc');
         assert.equal(errs.length, 1);
         assert.ok(errs[0].message.includes('Books'));
     });
 
     it('no error for aliased JOIN with unambiguous fields', () => {
         // Only Authors has 'name' and 'age', only Books has 'title' — unambiguous
-        assert.deepEqual(
-            validateCqlQuery(
-                'SELECT name, title FROM Authors AS A JOIN Books AS B ON A.ID = B.ID',
-                model,
-                'Svc',
-            ),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT name, title FROM Authors AS A JOIN Books AS B ON A.ID = B.ID', model, 'Svc'), []);
     });
 
     it('alias appears in ambiguity error message', () => {
-        const errs = validateCqlQuery(
-            'SELECT ID FROM Authors AS A JOIN Books AS B ON A.ID = B.ID',
-            model,
-            'Svc',
-        );
+        const errs = validateCqlQuery('SELECT ID FROM Authors AS A JOIN Books AS B ON A.ID = B.ID', model, 'Svc');
         const e = errs.find((e) => e.message.includes('Ambiguous'));
         assert.ok(e, 'expected ambiguity error');
         assert.ok(e.message.includes('A'), 'alias A should appear in message');
@@ -777,50 +652,25 @@ describe('validateCqlQuery', () => {
 
     it('does not flag SELECT-clause field names as unknown entities', () => {
         // Regression: field names (age, name) must not be treated as FROM sources
-        assert.deepEqual(
-            validateCqlQuery(
-                'SELECT age, name FROM Authors AS A',
-                model,
-                'Svc',
-            ),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT age, name FROM Authors AS A', model, 'Svc'), []);
     });
 
     it('reports error for field not on aliased entity', () => {
-        const errs = validateCqlQuery(
-            'SELECT A.ghost FROM Authors AS A',
-            model,
-            'Svc',
-        );
-        assert.ok(
-            errs.find((e) => e.message.includes("Unknown field 'ghost'")),
-        );
+        const errs = validateCqlQuery('SELECT A.ghost FROM Authors AS A', model, 'Svc');
+        assert.ok(errs.find((e) => e.message.includes("Unknown field 'ghost'")));
     });
 
     it('validates fields used in ORDER BY clause', () => {
-        assert.deepEqual(
-            validateCqlQuery('SELECT ID FROM Books ORDER BY ID', model, 'Svc'),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT ID FROM Books ORDER BY ID', model, 'Svc'), []);
     });
 
     it('reports error for unknown field in ORDER BY clause', () => {
-        const errs = validateCqlQuery(
-            'SELECT ID FROM Books ORDER BY ghost',
-            model,
-            'Svc',
-        );
-        assert.ok(
-            errs.find((e) => e.message.includes("Unknown field 'ghost'")),
-        );
+        const errs = validateCqlQuery('SELECT ID FROM Books ORDER BY ghost', model, 'Svc');
+        assert.ok(errs.find((e) => e.message.includes("Unknown field 'ghost'")));
     });
 
     it('accepts implicit alias (no AS keyword)', () => {
-        assert.deepEqual(
-            validateCqlQuery('SELECT B.ID FROM Books B', model, 'Svc'),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT B.ID FROM Books B', model, 'Svc'), []);
     });
 
     it('resolves entity by FQN when name contains dot and no prefix supplied', () => {
@@ -830,22 +680,12 @@ describe('validateCqlQuery', () => {
                 elements: { ID: { type: 'cds.UUID' } },
             },
         };
-        assert.deepEqual(
-            validateCqlQuery('SELECT ID FROM Svc.Books', fqnModel, undefined),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT ID FROM Svc.Books', fqnModel, undefined), []);
     });
 
     it('ignores field references inside parenthesised subquery context', () => {
         // Parentheses increase depth; tokens inside must be skipped for validation
-        assert.deepEqual(
-            validateCqlQuery(
-                'SELECT ID FROM Books WHERE ID IN (SELECT 1)',
-                model,
-                'Svc',
-            ),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT ID FROM Books WHERE ID IN (SELECT 1)', model, 'Svc'), []);
     });
 });
 
@@ -855,13 +695,7 @@ describe('validateCqlQuery', () => {
 
 describe('collectCqlAssignments', () => {
     function parse(src) {
-        const sf = TS.createSourceFile(
-            'test.ts',
-            src,
-            TS.ScriptTarget.Latest,
-            true,
-            TS.ScriptKind.TS,
-        );
+        const sf = TS.createSourceFile('test.ts', src, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
         return collectCqlAssignments(TS, sf);
     }
 
@@ -880,10 +714,7 @@ describe('collectCqlAssignments', () => {
     });
 
     it('detects multiple assignments in one file', () => {
-        const src = [
-            'const q1 = cds.ql`SELECT id FROM Books`;',
-            'const q2 = await cds.ql`SELECT name FROM Authors`;',
-        ].join('\n');
+        const src = ['const q1 = cds.ql`SELECT id FROM Books`;', 'const q2 = await cds.ql`SELECT name FROM Authors`;'].join('\n');
         const result = parse(src);
         assert.equal(result.length, 2);
         assert.equal(result[0].varName, 'q1');
@@ -903,16 +734,12 @@ describe('collectCqlAssignments', () => {
     });
 
     it('captures varName correctly', () => {
-        const result = parse(
-            'const myQueryResult = cds.ql`SELECT * FROM Books`',
-        );
+        const result = parse('const myQueryResult = cds.ql`SELECT * FROM Books`');
         assert.equal(result[0].varName, 'myQueryResult');
     });
 
     it('detects array-destructured assignment', () => {
-        const result = parse(
-            'const [first] = await cds.ql`SELECT id FROM Books`',
-        );
+        const result = parse('const [first] = await cds.ql`SELECT id FROM Books`');
         assert.equal(result.length, 1);
         assert.equal(result[0].varName, '[destructured]');
         assert.equal(result[0].awaited, true);
@@ -952,18 +779,9 @@ const EMPTY_BATCH_WORKER = (_root, _probes, _logger) => ({
 });
 
 /** A RunBatchWorker that returns a fixed set of fields for every entity. */
-const fieldsBatchWorker =
-    (
-        fields,
-    ) =>
-    (_root, probes, _logger) => ({
-        fields: Object.fromEntries(
-            probes.map((p) => [
-                p.entity,
-                fields.map((f) => ({ ...f, kind: 'field' })),
-            ]),
-        ),
-    });
+const fieldsBatchWorker = (fields) => (_root, probes, _logger) => ({
+    fields: Object.fromEntries(probes.map((p) => [p.entity, fields.map((f) => ({ ...f, kind: 'field' }))])),
+});
 
 /**
  * Returns a source string guaranteed to have enough budget for the rewrite cast.
@@ -976,74 +794,42 @@ const fieldsBatchWorker =
  * For JS files the cast ` = (/**@type{_qN}*\/(0))` must fit within
  * `decl.name.end → decl.initializer.end`. We use SAFE_BUDGET=80 as before.
  */
-function srcWithBudget(
-    varName,
-    query,
-    awaited = false,
-) {
+function srcWithBudget(varName, query, awaited = false) {
     // TS budget: template span = query.length + 2 (backticks).
     // Cast "`` as unknown as _q0" = 22 chars → need query.length >= 20.
     const MinQueryLen = 22;
-    const paddedQuery =
-        query.length < MinQueryLen
-            ? query + ' '.repeat(MinQueryLen - query.length)
-            : query;
+    const paddedQuery = query.length < MinQueryLen ? query + ' '.repeat(MinQueryLen - query.length) : query;
     return `const ${varName} = ${awaited ? 'await ' : ''}cds.ql\`${paddedQuery}\``;
 }
 
 /** A RunWorker stub that returns a fixed set of fields for any query. */
-const fieldsWorker =
-    (
-        fields,
-    ) =>
-    (_args, _logger) => ({
-        completions: fields.map((f) => ({ ...f, kind: 'field' })),
-    });
+const fieldsWorker = (fields) => (_args, _logger) => ({
+    completions: fields.map((f) => ({ ...f, kind: 'field' })),
+});
 
 /** A RunWorker stub that returns entities for FROM completions. */
-const entitiesWorker =
-    (entities) =>
-    (_args, _logger) => ({
-        completions: entities.map((e) => ({ ...e, kind: 'entity' })),
-    });
+const entitiesWorker = (entities) => (_args, _logger) => ({
+    completions: entities.map((e) => ({ ...e, kind: 'entity' })),
+});
 
 /** A RunWorker stub that dispatches based on the query text argument. */
-const dispatchWorker =
-    (handler) =>
-    (args, _logger) =>
-        handler(args);
+const dispatchWorker = (handler) => (args, _logger) => handler(args);
 
 /** Parse source text into a TS source file. */
-const parseTs = (src, fileName = 'test.ts') =>
-    TS.createSourceFile(
-        fileName,
-        src,
-        TS.ScriptTarget.Latest,
-        true,
-        TS.ScriptKind.TS,
-    );
+const parseTs = (src, fileName = 'test.ts') => TS.createSourceFile(fileName, src, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
 
 /** Find the byte offset of the first occurrence of needle in src. */
 function posOf(src, needle, occurrence = 0) {
     let idx = -1;
     for (let i = 0; i <= occurrence; i++) {
         idx = src.indexOf(needle, idx + 1);
-        assert.ok(
-            idx !== -1,
-            `"${needle}" not found in source (occurrence ${i})`,
-        );
+        assert.ok(idx !== -1, `"${needle}" not found in source (occurrence ${i})`);
     }
     return idx;
 }
 
 /** Build a minimal QueryContext with a given source text and worker. */
-function makeCtx(
-    origText,
-    worker = EMPTY_WORKER,
-    projectRoot = '/proj',
-    fileName = 'test.ts',
-    batchWorker,
-) {
+function makeCtx(origText, worker = EMPTY_WORKER, projectRoot = '/proj', fileName = 'test.ts', batchWorker) {
     const origSf = parseTs(origText, fileName);
     // Hover now resolves the row type through the batch worker (same path as the
     // type rewriter). When no explicit batch worker is given, derive one from the
@@ -1053,14 +839,8 @@ function makeCtx(
         fields: Object.fromEntries(
             probes.map((p) => {
                 const probeQuery = `SELECT  FROM ${p.entity} WHERE `;
-                const r = worker(
-                    [root, probeQuery, String(probeQuery.length), p.prefix],
-                    logger,
-                );
-                return [
-                    p.entity,
-                    (r?.completions ?? []).filter((c) => c.kind === 'field'),
-                ];
+                const r = worker([root, probeQuery, String(probeQuery.length), p.prefix], logger);
+                return [p.entity, (r?.completions ?? []).filter((c) => c.kind === 'field')];
             }),
         ),
     });
@@ -1075,25 +855,10 @@ function makeCtx(
 }
 
 /** Call rewriteSnapshot with stub caches and worker. Returns rewritten string. */
-function rewrite(
-    src,
-    batchWorker = EMPTY_BATCH_WORKER,
-    fileName = 'test.ts',
-) {
+function rewrite(src, batchWorker = EMPTY_BATCH_WORKER, fileName = 'test.ts') {
     const origSource = new Map();
     const cache = new Map();
-    return rewriteSnapshot(
-        fileName,
-        src,
-        TS,
-        origSource,
-        cache,
-        EMPTY_WORKER,
-        batchWorker,
-        NO_LOGGER,
-        '/proj',
-        undefined,
-    );
+    return rewriteSnapshot(fileName, src, TS, origSource, cache, EMPTY_WORKER, batchWorker, NO_LOGGER, '/proj', undefined);
 }
 
 // ---------------------------------------------------------------------------
@@ -1120,34 +885,23 @@ describe('rewriteSnapshot — position contract', () => {
         const src = srcWithBudget('r', 'SELECT id FROM Books', false);
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker);
-        assert.ok(
-            rw.length > src.length,
-            'alias always appended → output is longer',
-        );
+        assert.ok(rw.length > src.length, 'alias always appended → output is longer');
     });
 
     it('rewrite preserves the same number of newlines within the original content', () => {
-        const src = [
-            '// @cds-service Svc',
-            srcWithBudget('r', 'SELECT id FROM Books', false),
-        ].join('\n');
+        const src = ['// @cds-service Svc', srcWithBudget('r', 'SELECT id FROM Books', false)].join('\n');
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker);
         // The original content section (before the appended tail) must have same newlines
         const origNewlines = (src.match(/\n/g) ?? []).length;
         const rwOrigSection = rw.slice(0, src.length);
         const rwNewlines = (rwOrigSection.match(/\n/g) ?? []).length;
-        assert.equal(
-            rwNewlines,
-            origNewlines,
-            'no newlines added or removed within original content',
-        );
+        assert.equal(rwNewlines, origNewlines, 'no newlines added or removed within original content');
     });
 
     it('alias path: rewritten text is longer but original line count is preserved', () => {
         // Short query → budget too small for inline → alias path
-        const src =
-            '// @cds-service AdminService\nconst result = await cds.ql`SELECT ID, name FROM Books`\nconsole.log(result);';
+        const src = '// @cds-service AdminService\nconst result = await cds.ql`SELECT ID, name FROM Books`\nconsole.log(result);';
         const worker = fieldsBatchWorker([
             { label: 'ID', detail: 'cds.UUID' },
             { label: 'name', detail: 'cds.String' },
@@ -1158,11 +912,7 @@ describe('rewriteSnapshot — position contract', () => {
         // But original lines 0..N are byte-identical → line 1 starts at same byte
         const origLine1Start = src.indexOf('\n') + 1;
         const rwLine1Start = rw.indexOf('\n') + 1;
-        assert.equal(
-            rwLine1Start,
-            origLine1Start,
-            'original lines must start at same byte offsets',
-        );
+        assert.equal(rwLine1Start, origLine1Start, 'original lines must start at same byte offsets');
     });
 
     it('multi-line template: rewritten snapshot has the same number of lines as the original', () => {
@@ -1190,21 +940,11 @@ describe('rewriteSnapshot — position contract', () => {
         // The original content (before appended tail aliases) must have the same line count
         const origLines = src.split('\n').length;
         const rwOrigLines = rw.slice(0, src.length).split('\n').length;
-        assert.equal(
-            rwOrigLines,
-            origLines,
-            `original section must preserve line count (orig ${origLines}, got ${rwOrigLines})`,
-        );
+        assert.equal(rwOrigLines, origLines, `original section must preserve line count (orig ${origLines}, got ${rwOrigLines})`);
     });
 
     it('multi-line template: line count is preserved and bytes after the span are unchanged', () => {
-        const lines = [
-            '// @cds-service AdminService',
-            'const result = await cds.ql`',
-            '        SELECT ID, descr FROM Books',
-            '    `;',
-            'console.log(result);',
-        ];
+        const lines = ['// @cds-service AdminService', 'const result = await cds.ql`', '        SELECT ID, descr FROM Books', '    `;', 'console.log(result);'];
         const src = lines.join('\n');
         const worker = fieldsBatchWorker([
             { label: 'ID', detail: 'cds.UUID' },
@@ -1215,20 +955,12 @@ describe('rewriteSnapshot — position contract', () => {
         // The rewritten snapshot is longer (alias appended), but the ORIGINAL content
         // section (first src.length bytes) must preserve the same line count.
         const origSection = rw.slice(0, src.length);
-        assert.equal(
-            origSection.split('\n').length,
-            src.split('\n').length,
-            'line count must be preserved',
-        );
+        assert.equal(origSection.split('\n').length, src.split('\n').length, 'line count must be preserved');
 
         // Bytes after decl.initializer.end are unchanged within the original content section.
         // The suffix 'console.log(result);' must appear verbatim at the same position.
         const suffixInOrig = src.lastIndexOf('console.log');
-        assert.equal(
-            rw.slice(suffixInOrig, src.length),
-            src.slice(suffixInOrig),
-            'bytes after span must be unchanged',
-        );
+        assert.equal(rw.slice(suffixInOrig, src.length), src.slice(suffixInOrig), 'bytes after span must be unchanged');
     });
 
     it('preserves all bytes before the start of the declaration line', () => {
@@ -1240,18 +972,12 @@ describe('rewriteSnapshot — position contract', () => {
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker);
 
-        assert.equal(
-            rw.slice(0, before.length),
-            src.slice(0, before.length),
-            'bytes on lines before the declaration must be identical',
-        );
+        assert.equal(rw.slice(0, before.length), src.slice(0, before.length), 'bytes on lines before the declaration must be identical');
     });
 
     it('preserves all bytes after decl.initializer.end (within original content)', () => {
         // Suffix after the declaration must be unchanged in the original-content section
-        const src =
-            srcWithBudget('r', 'SELECT id FROM Books', false) +
-            '; doSomething();';
+        const src = srcWithBudget('r', 'SELECT id FROM Books', false) + '; doSomething();';
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker);
 
@@ -1260,11 +986,7 @@ describe('rewriteSnapshot — position contract', () => {
         const decl = asns[0].template.parent;
         const initEnd = decl.initializer.end;
 
-        assert.equal(
-            rw.slice(initEnd, src.length),
-            src.slice(initEnd),
-            'bytes after decl.initializer.end must be identical within original content',
-        );
+        assert.equal(rw.slice(initEnd, src.length), src.slice(initEnd), 'bytes after decl.initializer.end must be identical within original content');
     });
 
     it('produces identity rewrite when worker returns no fields', () => {
@@ -1291,11 +1013,7 @@ describe('rewriteSnapshot — position contract', () => {
         const tpl = asns[0].template.template;
 
         // TS approach: template span replaced with `` `` as unknown as _qN ``
-        assert.ok(
-            rw.slice(tpl.pos, tpl.end).startsWith('`` as unknown as _q'),
-            'Expected backtick-cast as unknown as _qN, got: ' +
-                JSON.stringify(rw.slice(tpl.pos, tpl.pos + 30)),
-        );
+        assert.ok(rw.slice(tpl.pos, tpl.end).startsWith('`` as unknown as _q'), 'Expected backtick-cast as unknown as _qN, got: ' + JSON.stringify(rw.slice(tpl.pos, tpl.pos + 30)));
     });
 
     it('js file: rewritten initializer uses JSDoc @type cast syntax', () => {
@@ -1308,10 +1026,7 @@ describe('rewriteSnapshot — position contract', () => {
         const decl = asns[0].template.parent;
         const nameEnd = decl.name.end;
 
-        assert.ok(
-            rw.slice(nameEnd).startsWith(' = (/**@type{'),
-            `Expected JS JSDoc cast, got: ${JSON.stringify(rw.slice(nameEnd, nameEnd + 20))}`,
-        );
+        assert.ok(rw.slice(nameEnd).startsWith(' = (/**@type{'), `Expected JS JSDoc cast, got: ${JSON.stringify(rw.slice(nameEnd, nameEnd + 20))}`);
     });
 
     it('rewritten cast embeds the correct type for awaited query', () => {
@@ -1319,34 +1034,22 @@ describe('rewriteSnapshot — position contract', () => {
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker);
         // Type is always in the tail alias — check the tail, not the cast
-        assert.ok(
-            rw.includes('_q'),
-            `expected alias reference in cast, got: ${rw}`,
-        );
-        assert.ok(
-            !rw.includes('Promise<'),
-            `awaited should not have Promise< in tail alias, got: ${rw}`,
-        );
+        assert.ok(rw.includes('_q'), `expected alias reference in cast, got: ${rw}`);
+        assert.ok(!rw.includes('Promise<'), `awaited should not have Promise< in tail alias, got: ${rw}`);
     });
 
     it('rewritten cast embeds Promise<...> for non-awaited query', () => {
         const src = srcWithBudget('r', 'SELECT id FROM Books', false);
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker);
-        assert.ok(
-            rw.includes('Promise<'),
-            `non-awaited should have Promise<, got: ${rw}`,
-        );
+        assert.ok(rw.includes('Promise<'), `non-awaited should have Promise<, got: ${rw}`);
     });
 
     it('type reflects cdsTypeToTs mapping (UUID → string)', () => {
         const src = srcWithBudget('r', 'SELECT id FROM Books', false);
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker);
-        assert.ok(
-            rw.includes('id:string'),
-            `expected id:string in cast, got: ${rw}`,
-        );
+        assert.ok(rw.includes('id:string'), `expected id:string in cast, got: ${rw}`);
     });
 
     it('type reflects multiple fields', () => {
@@ -1382,29 +1085,18 @@ describe('rewriteSnapshot — position contract', () => {
     // ── multiple assignments ──────────────────────────────────────────────────
 
     it('array-destructured assignment is rewritten with the same array type', () => {
-        const src =
-            'const [first] = await cds.ql`SELECT id FROM Books`;\nexport {};';
+        const src = 'const [first] = await cds.ql`SELECT id FROM Books`;\nexport {};';
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker, 'test.ts');
-        assert.ok(
-            rw.includes('_q'),
-            'expected alias reference in rewritten source',
-        );
-        assert.ok(
-            rw.includes('{id:string}[]'),
-            'expected array row type (not element type)',
-        );
+        assert.ok(rw.includes('_q'), 'expected alias reference in rewritten source');
+        assert.ok(rw.includes('{id:string}[]'), 'expected array row type (not element type)');
     });
 
     it('multi-element destructure is rewritten with the same array type', () => {
-        const src =
-            'const [r1, r2] = await cds.ql`SELECT id FROM Books`;\nexport {};';
+        const src = 'const [r1, r2] = await cds.ql`SELECT id FROM Books`;\nexport {};';
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker, 'test.ts');
-        assert.ok(
-            rw.includes('_q'),
-            'expected alias reference in rewritten source',
-        );
+        assert.ok(rw.includes('_q'), 'expected alias reference in rewritten source');
         assert.ok(rw.includes('{id:string}[]'), 'expected array row type');
     });
 
@@ -1419,44 +1111,26 @@ describe('rewriteSnapshot — position contract', () => {
         const rw = rewrite(src, worker);
         // Two aliases appended
         const defs = rw.match(/type _q\d+=/g) ?? [];
-        assert.equal(
-            defs.length,
-            2,
-            `expected 2 alias definitions, got: ${defs.join(', ')}`,
-        );
+        assert.equal(defs.length, 2, `expected 2 alias definitions, got: ${defs.join(', ')}`);
     });
 
     it('each assignment gets a unique alias name', () => {
-        const src = [
-            'const q1 = cds.ql`SELECT * FROM Books`;',
-            'const q2 = await cds.ql`SELECT * FROM Authors`;',
-        ].join('\n');
+        const src = ['const q1 = cds.ql`SELECT * FROM Books`;', 'const q2 = await cds.ql`SELECT * FROM Authors`;'].join('\n');
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker);
 
         // Both assignments get aliased
         const aliasCount = (rw.match(/_q\d+/g) ?? []).length;
-        assert.ok(
-            aliasCount >= 2,
-            `expected at least 2 alias references, got ${aliasCount} in:\n${rw}`,
-        );
+        assert.ok(aliasCount >= 2, `expected at least 2 alias references, got ${aliasCount} in:\n${rw}`);
 
         // Each alias definition must be unique
         const defs = rw.match(/type _q\d+=/g) ?? [];
         const uniqueDefs = new Set(defs);
-        assert.equal(
-            uniqueDefs.size,
-            defs.length,
-            `alias definitions must be unique: ${defs.join(', ')}`,
-        );
+        assert.equal(uniqueDefs.size, defs.length, `alias definitions must be unique: ${defs.join(', ')}`);
     });
 
     it('preserves bytes of all original lines when multiple assignments exist', () => {
-        const src = [
-            'const q1 = cds.ql`SELECT id FROM Books`;',
-            'const q2 = await cds.ql`SELECT name FROM Authors`;',
-            'export { q1, q2 };',
-        ].join('\n');
+        const src = ['const q1 = cds.ql`SELECT id FROM Books`;', 'const q2 = await cds.ql`SELECT name FROM Authors`;', 'export { q1, q2 };'].join('\n');
         const worker = fieldsBatchWorker([
             { label: 'id', detail: 'cds.UUID' },
             { label: 'name', detail: 'cds.String' },
@@ -1467,20 +1141,14 @@ describe('rewriteSnapshot — position contract', () => {
         const lastOrigNewline = src.lastIndexOf('\n');
         const lastRwNewline = rw.indexOf('\n', lastOrigNewline); // may differ if alias appended
         // The 'export' line must appear unchanged in rw
-        assert.ok(
-            rw.includes('export { q1, q2 };'),
-            'export line must be unchanged in rewritten',
-        );
+        assert.ok(rw.includes('export { q1, q2 };'), 'export line must be unchanged in rewritten');
     });
 
     // ── multiple queries targeting different FROM clauses ─────────────────────
 
     it('multi-query: each query uses the fields of its own FROM entity', () => {
         // q1 queries Books, q2 queries Authors — batch worker dispatches on entity name
-        const src = [
-            srcWithBudget('q1', 'SELECT * FROM Books', false),
-            srcWithBudget('q2', 'SELECT * FROM Authors', false),
-        ].join('\n');
+        const src = [srcWithBudget('q1', 'SELECT * FROM Books', false), srcWithBudget('q2', 'SELECT * FROM Authors', false)].join('\n');
         const worker = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => [
@@ -1504,14 +1172,8 @@ describe('rewriteSnapshot — position contract', () => {
             ),
         });
         const rw = rewrite(src, worker);
-        assert.ok(
-            rw.includes('title:string'),
-            `expected Books field 'title' in rewritten`,
-        );
-        assert.ok(
-            rw.includes('name:string'),
-            `expected Authors field 'name' in rewritten`,
-        );
+        assert.ok(rw.includes('title:string'), `expected Books field 'title' in rewritten`);
+        assert.ok(rw.includes('name:string'), `expected Authors field 'name' in rewritten`);
     });
 
     it('multi-query: alias names encode the declaration line number', () => {
@@ -1528,21 +1190,12 @@ describe('rewriteSnapshot — position contract', () => {
         const worker = fieldsBatchWorker(manyFields);
         const rw = rewrite(src, worker);
         // Alias names must reflect line numbers (0 and 1)
-        assert.ok(
-            rw.includes('_q0'),
-            `expected _q0 for line-0 declaration, got:\n${rw}`,
-        );
-        assert.ok(
-            rw.includes('_q1'),
-            `expected _q1 for line-1 declaration, got:\n${rw}`,
-        );
+        assert.ok(rw.includes('_q0'), `expected _q0 for line-0 declaration, got:\n${rw}`);
+        assert.ok(rw.includes('_q1'), `expected _q1 for line-1 declaration, got:\n${rw}`);
     });
 
     it('multi-query: each query type is independent (Books type has no Authors fields)', () => {
-        const src = [
-            srcWithBudget('q1', 'SELECT * FROM Books', false),
-            srcWithBudget('q2', 'SELECT * FROM Authors', false),
-        ].join('\n');
+        const src = [srcWithBudget('q1', 'SELECT * FROM Books', false), srcWithBudget('q2', 'SELECT * FROM Authors', false)].join('\n');
         const worker = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => [
@@ -1570,10 +1223,7 @@ describe('rewriteSnapshot — position contract', () => {
         assert.ok(rw.includes('isbn:string'), 'expected isbn from Books');
         assert.ok(rw.includes('awards:number'), 'expected awards from Authors');
         // Verify independence: the isbn cast appears before the awards cast
-        assert.ok(
-            rw.indexOf('isbn') < rw.indexOf('awards'),
-            'Books cast must precede Authors cast',
-        );
+        assert.ok(rw.indexOf('isbn') < rw.indexOf('awards'), 'Books cast must precede Authors cast');
     });
 
     // ── caching ───────────────────────────────────────────────────────────────
@@ -1601,38 +1251,12 @@ describe('rewriteSnapshot — position contract', () => {
         const origSource = new Map();
         const cache = new Map();
 
-        const rw1 = rewriteSnapshot(
-            'test.ts',
-            src,
-            TS,
-            origSource,
-            cache,
-            EMPTY_WORKER,
-            countingWorker,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-        );
+        const rw1 = rewriteSnapshot('test.ts', src, TS, origSource, cache, EMPTY_WORKER, countingWorker, NO_LOGGER, '/proj', undefined);
         const callsAfterFirst = workerCallCount;
-        const rw2 = rewriteSnapshot(
-            'test.ts',
-            src,
-            TS,
-            origSource,
-            cache,
-            EMPTY_WORKER,
-            countingWorker,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-        );
+        const rw2 = rewriteSnapshot('test.ts', src, TS, origSource, cache, EMPTY_WORKER, countingWorker, NO_LOGGER, '/proj', undefined);
 
         assert.equal(rw1, rw2, 'cached result must be identical');
-        assert.equal(
-            workerCallCount,
-            callsAfterFirst,
-            'worker must not be called on cache hit',
-        );
+        assert.equal(workerCallCount, callsAfterFirst, 'worker must not be called on cache hit');
     });
 
     it('re-runs rewrite when source text changes', () => {
@@ -1645,37 +1269,11 @@ describe('rewriteSnapshot — position contract', () => {
         const origSource = new Map();
         const cache = new Map();
 
-        const rw1 = rewriteSnapshot(
-            'test.ts',
-            src1,
-            TS,
-            origSource,
-            cache,
-            EMPTY_WORKER,
-            worker,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-        );
-        const rw2 = rewriteSnapshot(
-            'test.ts',
-            src2,
-            TS,
-            origSource,
-            cache,
-            EMPTY_WORKER,
-            worker,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-        );
+        const rw1 = rewriteSnapshot('test.ts', src1, TS, origSource, cache, EMPTY_WORKER, worker, NO_LOGGER, '/proj', undefined);
+        const rw2 = rewriteSnapshot('test.ts', src2, TS, origSource, cache, EMPTY_WORKER, worker, NO_LOGGER, '/proj', undefined);
 
         // Different sources produce different rewrites
-        assert.notEqual(
-            rw1,
-            rw2,
-            'different source texts must produce different rewrites',
-        );
+        assert.notEqual(rw1, rw2, 'different source texts must produce different rewrites');
         // Template span is replaced with as-unknown-as cast
         assert.ok(rw1.includes('as unknown as'), 'rw1 must contain the cast');
         assert.ok(rw2.includes('as unknown as'), 'rw2 must contain the cast');
@@ -1685,17 +1283,10 @@ describe('rewriteSnapshot — position contract', () => {
         // First call: worker returns fields for q1 but not q2 (model not loaded yet)
         // Second call: worker returns fields for both
         // Expected: second call produces full rewrite (q2 must not be stuck as unrewritten)
-        const src = [
-            'const q1 = cds.ql`SELECT id FROM Books                    `;',
-            'const q2 = cds.ql`SELECT name FROM Authors                `;',
-        ].join('\n');
+        const src = ['const q1 = cds.ql`SELECT id FROM Books                    `;', 'const q2 = cds.ql`SELECT name FROM Authors                `;'].join('\n');
 
         let callCount = 0;
-        const partialThenFullWorker = (
-            _root,
-            probes,
-            _logger,
-        ) => {
+        const partialThenFullWorker = (_root, probes, _logger) => {
             callCount++;
             const fields = {};
             for (const { entity } of probes) {
@@ -1725,37 +1316,12 @@ describe('rewriteSnapshot — position contract', () => {
         const origSource = new Map();
         const cache = new Map();
 
-        const rw1 = rewriteSnapshot(
-            'test.ts',
-            src,
-            TS,
-            origSource,
-            cache,
-            EMPTY_WORKER,
-            partialThenFullWorker,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-        );
+        const rw1 = rewriteSnapshot('test.ts', src, TS, origSource, cache, EMPTY_WORKER, partialThenFullWorker, NO_LOGGER, '/proj', undefined);
         // q1 rewritten, q2 not (worker miss → not cached)
         assert.ok(rw1.includes('_q0'), 'first pass: q1 must be rewritten');
-        assert.ok(
-            !rw1.includes('_q1'),
-            'first pass: q2 must not be rewritten yet',
-        );
+        assert.ok(!rw1.includes('_q1'), 'first pass: q2 must not be rewritten yet');
 
-        const rw2 = rewriteSnapshot(
-            'test.ts',
-            src,
-            TS,
-            origSource,
-            cache,
-            EMPTY_WORKER,
-            partialThenFullWorker,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-        );
+        const rw2 = rewriteSnapshot('test.ts', src, TS, origSource, cache, EMPTY_WORKER, partialThenFullWorker, NO_LOGGER, '/proj', undefined);
         // Second call must retry (was not cached) and now resolve q2 too
         assert.ok(rw2.includes('_q0'), 'second pass: q1 still rewritten');
         assert.ok(rw2.includes('_q1'), 'second pass: q2 must now be rewritten');
@@ -1791,10 +1357,7 @@ describe('rewriteSnapshot — position identity for template-internal positions'
         // findCdsQueryTemplate uses origSf — the offset must work against original
         const origSf = parseTs(src);
         const template = findCdsQueryTemplate(TS, origSf, selectPos);
-        assert.ok(
-            template,
-            `findCdsQueryTemplate should find template at offset ${selectPos}`,
-        );
+        assert.ok(template, `findCdsQueryTemplate should find template at offset ${selectPos}`);
     });
 
     it('findCdsQueryTemplate works at every position inside the template', () => {
@@ -1808,10 +1371,7 @@ describe('rewriteSnapshot — position identity for template-internal positions'
         // Every position from backtick+1 to templateEnd-1 must find the template
         for (let pos = backtickPos + 1; pos < templateEnd; pos++) {
             const found = findCdsQueryTemplate(TS, origSf, pos);
-            assert.ok(
-                found,
-                `findCdsQueryTemplate should find template at offset ${pos}`,
-            );
+            assert.ok(found, `findCdsQueryTemplate should find template at offset ${pos}`);
         }
     });
 
@@ -1824,11 +1384,7 @@ describe('rewriteSnapshot — position identity for template-internal positions'
         // First character of template content is at pos+1 (skip backtick)
         const firstPos = tpl.template.pos + 1;
         const off = offsetInTemplate(TS, tpl, firstPos);
-        assert.equal(
-            off,
-            0,
-            'offset at first char of template content should be 0',
-        );
+        assert.equal(off, 0, 'offset at first char of template content should be 0');
     });
 
     it('offsetInTemplate for FROM position returns correct query offset', () => {
@@ -1842,11 +1398,7 @@ describe('rewriteSnapshot — position identity for template-internal positions'
         const fromPosInQuery = posOf(query, 'FROM');
 
         const off = offsetInTemplate(TS, tpl, fromPosInSrc);
-        assert.equal(
-            off,
-            fromPosInQuery,
-            'offsetInTemplate must match position within query string',
-        );
+        assert.equal(off, fromPosInQuery, 'offsetInTemplate must match position within query string');
     });
 
     it('offsetInTemplate works for WHERE position', () => {
@@ -1881,17 +1433,10 @@ describe('rewriteSnapshot — position identity for template-internal positions'
         // In rewritten snapshot, byte fromPosInSrc is still within the replaced span,
         // but the OFFSET is the same. findCdsQueryTemplate on origSf at this offset works.
         const templateInOrig = findCdsQueryTemplate(TS, origSf, fromPosInSrc);
-        assert.ok(
-            templateInOrig,
-            'must find template in origSf at FROM position',
-        );
+        assert.ok(templateInOrig, 'must find template in origSf at FROM position');
 
         const off = offsetInTemplate(TS, templateInOrig, fromPosInSrc);
-        assert.equal(
-            off,
-            posOf(query, 'FROM'),
-            'query offset must match regardless of rewrite',
-        );
+        assert.equal(off, posOf(query, 'FROM'), 'query offset must match regardless of rewrite');
     });
 
     it('bytes outside the initializer span (before and after) are preserved', () => {
@@ -1903,30 +1448,18 @@ describe('rewriteSnapshot — position identity for template-internal positions'
         const rw = rewrite(src, worker);
 
         // 'before' is before the declaration — must be identical
-        assert.equal(
-            rw.slice(0, before.length),
-            src.slice(0, before.length),
-            'bytes before declaration unchanged',
-        );
+        assert.equal(rw.slice(0, before.length), src.slice(0, before.length), 'bytes before declaration unchanged');
 
         // Bytes between initEnd and end of original content are unchanged
         const sf = parseTs(src);
         const asns = collectCqlAssignments(TS, sf);
         const decl2 = asns[0].template.parent;
         const initEnd = decl2.initializer.end;
-        assert.equal(
-            rw.slice(initEnd, src.length),
-            src.slice(initEnd),
-            'bytes after initializer (within original content) unchanged',
-        );
+        assert.equal(rw.slice(initEnd, src.length), src.slice(initEnd), 'bytes after initializer (within original content) unchanged');
     });
 
     it('original lines start at same byte offsets regardless of how many fields are selected', () => {
-        const srcShort = [
-            '// @cds-service AdminService',
-            'const r = await cds.ql`SELECT ID FROM Books`',
-            'doSomething(r);',
-        ].join('\n');
+        const srcShort = ['// @cds-service AdminService', 'const r = await cds.ql`SELECT ID FROM Books`', 'doSomething(r);'].join('\n');
         const worker = fieldsBatchWorker([{ label: 'ID', detail: 'cds.UUID' }]);
         const rw = rewrite(srcShort, worker);
 
@@ -1939,11 +1472,7 @@ describe('rewriteSnapshot — position identity for template-internal positions'
         const rwLine1End = rw.indexOf('\n', line1Start);
         assert.equal(rwLine1End, line1End, 'line 1 length preserved');
         // Code after declaration is at same byte position
-        assert.equal(
-            rw.indexOf('doSomething'),
-            srcShort.indexOf('doSomething'),
-            'code after declaration must start at same byte offset',
-        );
+        assert.equal(rw.indexOf('doSomething'), srcShort.indexOf('doSomething'), 'code after declaration must start at same byte offset');
     });
 });
 
@@ -1959,29 +1488,12 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
      * These helpers extract the alias name from the cast, then look up its definition.
      */
 
-    function getAliasName(
-        rewrittenSrc,
-        varName,
-        fileName = 'test.ts',
-    ) {
-        const sf = TS.createSourceFile(
-            fileName,
-            rewrittenSrc,
-            TS.ScriptTarget.Latest,
-            true,
-            TS.ScriptKind.TS,
-        );
+    function getAliasName(rewrittenSrc, varName, fileName = 'test.ts') {
+        const sf = TS.createSourceFile(fileName, rewrittenSrc, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
         let alias = '';
         function visit(node) {
-            if (
-                TS.isVariableDeclaration(node) &&
-                TS.isIdentifier(node.name) &&
-                node.name.text === varName
-            ) {
-                const span = rewrittenSrc.slice(
-                    node.name.end,
-                    node.initializer?.end ?? node.end,
-                );
+            if (TS.isVariableDeclaration(node) && TS.isIdentifier(node.name) && node.name.text === varName) {
+                const span = rewrittenSrc.slice(node.name.end, node.initializer?.end ?? node.end);
                 // TS new strategy: `` `` as unknown as _qN `` inside the template span
                 const mTsCast = span.match(/`` as unknown as (_q\d+)/);
                 if (mTsCast) {
@@ -2013,28 +1525,17 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
         return alias;
     }
 
-    function getAliasType(
-        rewrittenSrc,
-        aliasName,
-        fileName = 'test.ts',
-    ) {
+    function getAliasType(rewrittenSrc, aliasName, fileName = 'test.ts') {
         // TS tail: `type _qN=...;`  (type body may contain `;` inside `{...}`)
         const mTs = rewrittenSrc.match(new RegExp(`type ${aliasName}=(.+);`));
         if (mTs) return mTs[1];
         // JS tail: `/**@typedef {T} _qN*/`
-        const mJs = rewrittenSrc.match(
-            new RegExp(`@typedef \\{(.+?)\\} ${aliasName}`),
-        );
+        const mJs = rewrittenSrc.match(new RegExp(`@typedef \\{(.+?)\\} ${aliasName}`));
         if (mJs) return mJs[1];
         return '';
     }
 
-    function getInferredType(
-        src,
-        varName,
-        worker,
-        fileName = 'test.ts',
-    ) {
+    function getInferredType(src, varName, worker, fileName = 'test.ts') {
         const rw = rewrite(src, worker, fileName);
         const alias = getAliasName(rw, varName, fileName);
         return alias ? getAliasType(rw, alias, fileName) : '';
@@ -2045,10 +1546,7 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker, 'test.ts');
         const alias = getAliasName(rw, 'r', 'test.ts');
-        assert.ok(
-            alias.startsWith('_q'),
-            `expected _q alias in annotation, got alias: ${alias}`,
-        );
+        assert.ok(alias.startsWith('_q'), `expected _q alias in annotation, got alias: ${alias}`);
     });
 
     it('js: cast in source uses alias identifier, not inline type', () => {
@@ -2056,70 +1554,29 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
         const worker = fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]);
         const rw = rewrite(src, worker, 'test.js');
         const alias = getAliasName(rw, 'r', 'test.js');
-        assert.ok(
-            alias.startsWith('_q'),
-            `expected _q alias in js cast, got alias: ${alias}`,
-        );
+        assert.ok(alias.startsWith('_q'), `expected _q alias in js cast, got alias: ${alias}`);
     });
 
     it('ts: non-awaited query alias expands to Promise<{...}[]>', () => {
-        const typeStr = getInferredType(
-            srcWithBudget('r', 'SELECT id FROM Books', false),
-            'r',
-            fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]),
-            'test.ts',
-        );
-        assert.ok(
-            typeStr.startsWith('Promise<'),
-            `expected Promise<, got: ${typeStr}`,
-        );
-        assert.ok(
-            typeStr.includes('id:string'),
-            `expected id:string, got: ${typeStr}`,
-        );
+        const typeStr = getInferredType(srcWithBudget('r', 'SELECT id FROM Books', false), 'r', fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]), 'test.ts');
+        assert.ok(typeStr.startsWith('Promise<'), `expected Promise<, got: ${typeStr}`);
+        assert.ok(typeStr.includes('id:string'), `expected id:string, got: ${typeStr}`);
     });
 
     it('ts: awaited query alias expands to {field:type}[]', () => {
-        const typeStr = getInferredType(
-            srcWithBudget('r', 'SELECT id FROM Books', true),
-            'r',
-            fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]),
-            'test.ts',
-        );
-        assert.ok(
-            !typeStr.startsWith('Promise<'),
-            `awaited must not have Promise<, got: ${typeStr}`,
-        );
-        assert.ok(
-            typeStr.includes('id:string'),
-            `expected id:string, got: ${typeStr}`,
-        );
+        const typeStr = getInferredType(srcWithBudget('r', 'SELECT id FROM Books', true), 'r', fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]), 'test.ts');
+        assert.ok(!typeStr.startsWith('Promise<'), `awaited must not have Promise<, got: ${typeStr}`);
+        assert.ok(typeStr.includes('id:string'), `expected id:string, got: ${typeStr}`);
     });
 
     it('js: non-awaited query alias expands to Promise<{...}[]>', () => {
-        const typeStr = getInferredType(
-            srcWithBudget('r', 'SELECT id FROM Books', false),
-            'r',
-            fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]),
-            'test.js',
-        );
-        assert.ok(
-            typeStr.startsWith('Promise<'),
-            `expected Promise<, got: ${typeStr}`,
-        );
+        const typeStr = getInferredType(srcWithBudget('r', 'SELECT id FROM Books', false), 'r', fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]), 'test.js');
+        assert.ok(typeStr.startsWith('Promise<'), `expected Promise<, got: ${typeStr}`);
     });
 
     it('js: awaited query alias expands to {field:type}[]', () => {
-        const typeStr = getInferredType(
-            srcWithBudget('r', 'SELECT id FROM Books', true),
-            'r',
-            fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]),
-            'test.js',
-        );
-        assert.ok(
-            !typeStr.startsWith('Promise<'),
-            `awaited must not have Promise<, got: ${typeStr}`,
-        );
+        const typeStr = getInferredType(srcWithBudget('r', 'SELECT id FROM Books', true), 'r', fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]), 'test.js');
+        assert.ok(!typeStr.startsWith('Promise<'), `awaited must not have Promise<, got: ${typeStr}`);
     });
 
     it('type respects SELECT columns (only listed columns appear, using aliases)', () => {
@@ -2132,14 +1589,8 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             ]),
             'test.ts',
         );
-        assert.ok(
-            typeStr.includes('pk:string'),
-            `expected pk:string (alias), got: ${typeStr}`,
-        );
-        assert.ok(
-            !typeStr.includes('title:string'),
-            `title must not appear (not SELECTed), got: ${typeStr}`,
-        );
+        assert.ok(typeStr.includes('pk:string'), `expected pk:string (alias), got: ${typeStr}`);
+        assert.ok(!typeStr.includes('title:string'), `title must not appear (not SELECTed), got: ${typeStr}`);
     });
 
     it('multi-line query: AS alias used as property name, raw field name excluded', () => {
@@ -2161,22 +1612,10 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             { label: 'localized', detail: 'cds.Boolean' },
         ]);
         const typeStr = getInferredType(src, 'result', worker, 'test.ts');
-        assert.ok(
-            typeStr.includes('bookTitle:string'),
-            `alias bookTitle must appear in type, got: ${typeStr}`,
-        );
-        assert.ok(
-            !typeStr.includes('title:string'),
-            `raw field title must not appear (aliased), got: ${typeStr}`,
-        );
-        assert.ok(
-            typeStr.includes('descr:string'),
-            `descr must appear in type, got: ${typeStr}`,
-        );
-        assert.ok(
-            typeStr.includes('localized:boolean'),
-            `localized must appear in type, got: ${typeStr}`,
-        );
+        assert.ok(typeStr.includes('bookTitle:string'), `alias bookTitle must appear in type, got: ${typeStr}`);
+        assert.ok(!typeStr.includes('title:string'), `raw field title must not appear (aliased), got: ${typeStr}`);
+        assert.ok(typeStr.includes('descr:string'), `descr must appear in type, got: ${typeStr}`);
+        assert.ok(typeStr.includes('localized:boolean'), `localized must appear in type, got: ${typeStr}`);
     });
 
     it('type for SELECT * includes all scalar fields', () => {
@@ -2189,14 +1628,8 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             ]),
             'test.ts',
         );
-        assert.ok(
-            typeStr.includes('id:string'),
-            `expected id:string, got: ${typeStr}`,
-        );
-        assert.ok(
-            typeStr.includes('title:string'),
-            `expected title:string, got: ${typeStr}`,
-        );
+        assert.ok(typeStr.includes('id:string'), `expected id:string, got: ${typeStr}`);
+        assert.ok(typeStr.includes('title:string'), `expected title:string, got: ${typeStr}`);
     });
 
     it('associations are excluded from SELECT * type', () => {
@@ -2210,10 +1643,7 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             'test.ts',
         );
         assert.ok(typeStr.includes('id:string'), 'expected id:string');
-        assert.ok(
-            !typeStr.includes('author'),
-            'association must be excluded from SELECT *',
-        );
+        assert.ok(!typeStr.includes('author'), 'association must be excluded from SELECT *');
     });
 
     it('compositions are excluded from SELECT * type', () => {
@@ -2226,15 +1656,11 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             ]),
             'test.ts',
         );
-        assert.ok(
-            !typeStr.includes('items'),
-            'composition must be excluded from SELECT *',
-        );
+        assert.ok(!typeStr.includes('items'), 'composition must be excluded from SELECT *');
     });
 
     it('expand block: association field produces nested type', () => {
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { ID, author { name } }                       `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT FROM Books { ID, author { name } }                       `;\nexport {};';
         const batch = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => {
@@ -2271,19 +1697,12 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             ),
         });
         const typeStr = getInferredType(src, 'r', batch, 'test.ts');
-        assert.ok(
-            typeStr.includes('author'),
-            `expected author in type, got: ${typeStr}`,
-        );
-        assert.ok(
-            typeStr.includes('name'),
-            `expected name in type, got: ${typeStr}`,
-        );
+        assert.ok(typeStr.includes('author'), `expected author in type, got: ${typeStr}`);
+        assert.ok(typeStr.includes('name'), `expected name in type, got: ${typeStr}`);
     });
 
     it('expand block: FQN target entity (contains dot) uses empty prefix in BFS probe', () => {
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { author { age } }                          `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT FROM Books { author { age } }                          `;\nexport {};';
         const batch = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => {
@@ -2315,19 +1734,12 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             ),
         });
         const typeStr = getInferredType(src, 'r', batch, 'test.ts');
-        assert.ok(
-            typeStr.includes('author'),
-            `expected author in type, got: ${typeStr}`,
-        );
-        assert.ok(
-            typeStr.includes('age'),
-            `expected age in type, got: ${typeStr}`,
-        );
+        assert.ok(typeStr.includes('author'), `expected author in type, got: ${typeStr}`);
+        assert.ok(typeStr.includes('age'), `expected age in type, got: ${typeStr}`);
     });
 
     it('expand block with empty expand array produces {}[] for association without fields', () => {
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { ID, author { } }                          `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT FROM Books { ID, author { } }                          `;\nexport {};';
         const batch = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => [
@@ -2350,16 +1762,12 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
         });
         const typeStr = getInferredType(src, 'r', batch, 'test.ts');
         // author {} → expand with no columns → buildTypeBody(null for empty) → all fields of Authors
-        assert.ok(
-            typeStr.includes('author'),
-            `expected author in type, got: ${typeStr}`,
-        );
+        assert.ok(typeStr.includes('author'), `expected author in type, got: ${typeStr}`);
     });
 
     it('flat association column (no expand braces) produces implicit SELECT * expand type', () => {
         // genre selected flat without expand braces — has a target → treated as implicit expand
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { genre, ID }                               `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT FROM Books { genre, ID }                               `;\nexport {};';
         const batch = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => {
@@ -2396,23 +1804,13 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             ),
         });
         const typeStr = getInferredType(src, 'r', batch, 'test.ts');
-        assert.ok(
-            typeStr.includes('genre'),
-            `expected genre in type, got: ${typeStr}`,
-        );
-        assert.ok(
-            typeStr.includes('name'),
-            `expected genre.name in type, got: ${typeStr}`,
-        );
-        assert.ok(
-            typeStr.includes('ID'),
-            `expected ID in type, got: ${typeStr}`,
-        );
+        assert.ok(typeStr.includes('genre'), `expected genre in type, got: ${typeStr}`);
+        assert.ok(typeStr.includes('name'), `expected genre.name in type, got: ${typeStr}`);
+        assert.ok(typeStr.includes('ID'), `expected ID in type, got: ${typeStr}`);
     });
 
     it('expand block: to-one association renders as a scalar object (no [])', () => {
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { author { age } }                          `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT FROM Books { author { age } }                          `;\nexport {};';
         const batch = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => {
@@ -2446,20 +1844,12 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             ),
         });
         const typeStr = getInferredType(src, 'r', batch, 'test.ts');
-        assert.ok(
-            /author:\{age:number\}[^[]/.test(typeStr) ||
-                typeStr.includes('author:{age:number}}'),
-            `to-one expand must be a scalar object, got: ${typeStr}`,
-        );
-        assert.ok(
-            !/author:\{age:number\}\[\]/.test(typeStr),
-            `to-one expand must NOT be an array, got: ${typeStr}`,
-        );
+        assert.ok(/author:\{age:number\}[^[]/.test(typeStr) || typeStr.includes('author:{age:number}}'), `to-one expand must be a scalar object, got: ${typeStr}`);
+        assert.ok(!/author:\{age:number\}\[\]/.test(typeStr), `to-one expand must NOT be an array, got: ${typeStr}`);
     });
 
     it('expand block: to-many association renders as an array ([])', () => {
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { chapters { title } }                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT FROM Books { chapters { title } }                      `;\nexport {};';
         const batch = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => {
@@ -2492,16 +1882,12 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             ),
         });
         const typeStr = getInferredType(src, 'r', batch, 'test.ts');
-        assert.ok(
-            /chapters:\{title:string\}\[\]/.test(typeStr),
-            `to-many expand must be an array, got: ${typeStr}`,
-        );
+        assert.ok(/chapters:\{title:string\}\[\]/.test(typeStr), `to-many expand must be an array, got: ${typeStr}`);
     });
 
     it('expand block: to-one containing a to-many nests cardinality correctly', () => {
         // author (to-one) { books (to-many) { title } } → author:{books:{title:string}[]}
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { author { books { title } } }               `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT FROM Books { author { books { title } } }               `;\nexport {};';
         const batch = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => {
@@ -2547,14 +1933,8 @@ describe('rewriteSnapshot — TypeScript type inference', () => {
             ),
         });
         const typeStr = getInferredType(src, 'r', batch, 'test.ts');
-        assert.ok(
-            typeStr.includes('author:{books:{title:string}[]}'),
-            `mixed cardinality must nest to-many inside to-one, got: ${typeStr}`,
-        );
-        assert.ok(
-            !/author:\{books:\{title:string\}\[\]\}\[\]/.test(typeStr),
-            `outer to-one author must not become an array, got: ${typeStr}`,
-        );
+        assert.ok(typeStr.includes('author:{books:{title:string}[]}'), `mixed cardinality must nest to-many inside to-one, got: ${typeStr}`);
+        assert.ok(!/author:\{books:\{title:string\}\[\]\}\[\]/.test(typeStr), `outer to-one author must not become an array, got: ${typeStr}`);
     });
 });
 
@@ -2584,17 +1964,12 @@ describe('getCqlCompletions — proxy simulation', () => {
         const src = `const r = cds.ql\`${query}\``;
         // Position right after "SELECT " inside the template
         const posInSrc = posOf(src, 'SELECT') + 7;
-        const worker = fieldsWorker([
-            { label: 'id', detail: 'cds.UUID', entity: 'Svc.Books' },
-        ]);
+        const worker = fieldsWorker([{ label: 'id', detail: 'cds.UUID', entity: 'Svc.Books' }]);
         const ctx = makeCtx(src, worker);
         const result = getCqlCompletions('test.ts', posInSrc, ctx, TS);
         assert.ok(result, 'expected CompletionInfo');
         const names = result.entries.map((e) => e.name);
-        assert.ok(
-            names.includes('id'),
-            `expected 'id' in completions, got: ${JSON.stringify(names)}`,
-        );
+        assert.ok(names.includes('id'), `expected 'id' in completions, got: ${JSON.stringify(names)}`);
     });
 
     it('completion entries have correct kind for fields', () => {
@@ -2658,24 +2033,15 @@ describe('getCqlCompletions — proxy simulation', () => {
         const query = 'SELECT  FROM Books';
         const src = `const r = cds.ql\`${query}\``;
         const worker = fieldsWorker([{ label: 'id', detail: 'cds.UUID' }]);
-        const rw = rewrite(
-            src,
-            fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]),
-        );
+        const rw = rewrite(src, fieldsBatchWorker([{ label: 'id', detail: 'cds.UUID' }]));
 
         const posInSrc = posOf(src, 'SELECT') + 7;
 
-        assert.ok(
-            posInSrc < rw.length,
-            'position must be valid in rewritten snapshot',
-        );
+        assert.ok(posInSrc < rw.length, 'position must be valid in rewritten snapshot');
 
         const ctx = makeCtx(src, worker); // ctx uses original source text
         const result = getCqlCompletions('test.ts', posInSrc, ctx, TS);
-        assert.ok(
-            result,
-            'completions must work with position from rewritten snapshot',
-        );
+        assert.ok(result, 'completions must work with position from rewritten snapshot');
         assert.ok(result.entries.map((e) => e.name).includes('id'));
     });
 });
@@ -2704,11 +2070,7 @@ describe('CQL error surfacing — model unavailable', () => {
         const src = `const r = cds.ql\`${query}\``;
         const ctx = makeCtx(src, errorWorker);
         const diags = getCqlDiagnostics(ctx, TS);
-        assert.equal(
-            diags.length,
-            1,
-            'expected exactly one diagnostic for the query',
-        );
+        assert.equal(diags.length, 1, 'expected exactly one diagnostic for the query');
         const d = diags[0];
         assert.equal(d.category, TS.DiagnosticCategory.Warning);
         assert.equal(d.source, 'cds');
@@ -2757,14 +2119,8 @@ describe('getCqlHover — proxy simulation', () => {
         const result = getCqlHover('test.ts', posInSrc, ctx, TS);
         assert.ok(result, 'expected QuickInfo for field hover');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('cds field'),
-            `expected "cds field" in display, got: ${text}`,
-        );
-        assert.ok(
-            text.includes('id'),
-            `expected field name in display, got: ${text}`,
-        );
+        assert.ok(text.includes('cds field'), `expected "cds field" in display, got: ${text}`);
+        assert.ok(text.includes('id'), `expected field name in display, got: ${text}`);
     });
 
     it('returns QuickInfo for cursor on entity name in FROM clause', () => {
@@ -2786,10 +2142,7 @@ describe('getCqlHover — proxy simulation', () => {
         const result = getCqlHover('test.ts', posInSrc, ctx, TS);
         assert.ok(result, 'expected QuickInfo for entity hover');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('cds entity'),
-            `expected "cds entity" in display, got: ${text}`,
-        );
+        assert.ok(text.includes('cds entity'), `expected "cds entity" in display, got: ${text}`);
     });
 
     it('returns QuickInfo for cursor on result variable (Case 2)', () => {
@@ -2804,10 +2157,7 @@ describe('getCqlHover — proxy simulation', () => {
         assert.ok(result, 'expected QuickInfo for result variable hover');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
         // awaited → Array<{...}>
-        assert.ok(
-            text.includes('id: string') || text.includes('id:string'),
-            `expected id:string in type display, got: ${text}`,
-        );
+        assert.ok(text.includes('id: string') || text.includes('id:string'), `expected id:string in type display, got: ${text}`);
     });
 
     it('non-awaited result variable hover shows Promise<...>', () => {
@@ -2820,10 +2170,7 @@ describe('getCqlHover — proxy simulation', () => {
         const result = getCqlHover('test.ts', posInSrc, ctx, TS);
         assert.ok(result);
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('Promise<'),
-            `expected Promise< for non-awaited, got: ${text}`,
-        );
+        assert.ok(text.includes('Promise<'), `expected Promise< for non-awaited, got: ${text}`);
     });
 
     it('textSpan for field token points to correct offset in original source', () => {
@@ -2835,19 +2182,13 @@ describe('getCqlHover — proxy simulation', () => {
         const idInSrc = backtickPos + 1 + idInQuery;
 
         const worker = dispatchWorker((_args) => ({
-            completions: [
-                { label: 'id', detail: 'cds.UUID', kind: 'field' },
-            ],
+            completions: [{ label: 'id', detail: 'cds.UUID', kind: 'field' }],
         }));
         const ctx = makeCtx(src, worker);
         const result = getCqlHover('test.ts', idInSrc, ctx, TS);
         assert.ok(result, 'expected hover result');
         // textSpan.start must point to 'id' in the original source
-        assert.equal(
-            src.slice(result.textSpan.start, result.textSpan.start + 2),
-            'id',
-            `textSpan should point to 'id' in original source`,
-        );
+        assert.equal(src.slice(result.textSpan.start, result.textSpan.start + 2), 'id', `textSpan should point to 'id' in original source`);
     });
 
     it('entity hover with empty worker uses entity name as fqn fallback', () => {
@@ -2858,10 +2199,7 @@ describe('getCqlHover — proxy simulation', () => {
         const result = getCqlHover('test.ts', pos, ctx, TS);
         assert.ok(result, 'expected hover result');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('Books'),
-            'fqn must fall back to entity token value',
-        );
+        assert.ok(text.includes('Books'), 'fqn must fall back to entity token value');
     });
 
     it('entity hover with FQN entity name uses empty prefix for probe', () => {
@@ -2897,25 +2235,15 @@ describe('getCqlHover — proxy simulation', () => {
     // ── Case 3: binding element destructured from cds.ql result ──────────────
 
     it('hovering over binding element in const [{ID}] = await cds.ql`…` returns field type', () => {
-        const src =
-            'const [{ID}] = await cds.ql`SELECT ID FROM Books`;\nexport {};';
+        const src = 'const [{ID}] = await cds.ql`SELECT ID FROM Books`;\nexport {};';
         const worker = fieldsWorker([{ label: 'ID', detail: 'cds.Integer' }]);
         const ctx = makeCtx(src, worker);
         const pos = src.lastIndexOf('{ID}') + 1; // position of 'I' in {ID}
         const result = getCqlHover('test.ts', pos, ctx, TS);
-        assert.ok(
-            result,
-            'expected QuickInfo for destructured binding element',
-        );
+        assert.ok(result, 'expected QuickInfo for destructured binding element');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('ID'),
-            `hover must mention the field name 'ID', got: ${text}`,
-        );
-        assert.ok(
-            text.includes('number'),
-            `hover must show field type 'number' (cds.Integer → number), got: ${text}`,
-        );
+        assert.ok(text.includes('ID'), `hover must mention the field name 'ID', got: ${text}`);
+        assert.ok(text.includes('number'), `hover must show field type 'number' (cds.Integer → number), got: ${text}`);
     });
 
     it('hovering over binding element in non-awaited const [{ID}] = cds.ql`…` returns field type', () => {
@@ -2924,16 +2252,10 @@ describe('getCqlHover — proxy simulation', () => {
         const ctx = makeCtx(src, worker);
         const pos = src.lastIndexOf('{ID}') + 1;
         const result = getCqlHover('test.ts', pos, ctx, TS);
-        assert.ok(
-            result,
-            'expected QuickInfo for non-awaited destructured binding element',
-        );
+        assert.ok(result, 'expected QuickInfo for non-awaited destructured binding element');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
         assert.ok(text.includes('ID'), `hover must mention 'ID', got: ${text}`);
-        assert.ok(
-            text.includes('string'),
-            `hover must show string for cds.UUID, got: ${text}`,
-        );
+        assert.ok(text.includes('string'), `hover must show string for cds.UUID, got: ${text}`);
     });
 
     it('hovering over binding element not from cds.ql returns null', () => {
@@ -2941,16 +2263,11 @@ describe('getCqlHover — proxy simulation', () => {
         const ctx = makeCtx(src, EMPTY_WORKER);
         const pos = src.lastIndexOf('{ID}') + 1;
         const result = getCqlHover('test.ts', pos, ctx, TS);
-        assert.equal(
-            result,
-            null,
-            'must return null when array is not from cds.ql',
-        );
+        assert.equal(result, null, 'must return null when array is not from cds.ql');
     });
 
     it('hovering over direct array binding const [fst] = await cds.ql`…` returns row type', () => {
-        const src =
-            'const [fst] = await cds.ql`SELECT ID FROM Books                        `;\nexport {};';
+        const src = 'const [fst] = await cds.ql`SELECT ID FROM Books                        `;\nexport {};';
         const worker = fieldsWorker([
             { label: 'ID', detail: 'cds.Integer' },
             { label: 'title', detail: 'cds.String' },
@@ -2958,48 +2275,26 @@ describe('getCqlHover — proxy simulation', () => {
         const ctx = makeCtx(src, worker);
         const pos = src.indexOf('[fst]') + 1;
         const result = getCqlHover('test.ts', pos, ctx, TS);
-        assert.ok(
-            result,
-            'expected QuickInfo for direct array binding element',
-        );
+        assert.ok(result, 'expected QuickInfo for direct array binding element');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('fst'),
-            `hover must show variable name 'fst', got: ${text}`,
-        );
-        assert.ok(
-            text.includes('ID') && text.includes('number'),
-            `hover must show row type with ID:number, got: ${text}`,
-        );
+        assert.ok(text.includes('fst'), `hover must show variable name 'fst', got: ${text}`);
+        assert.ok(text.includes('ID') && text.includes('number'), `hover must show row type with ID:number, got: ${text}`);
     });
 
     it('hovering over array binding from cds.ql variable const [r1] = result returns row type', () => {
-        const src = [
-            'const result = await cds.ql`SELECT ID FROM Books                        `;',
-            'const [r1] = result;',
-        ].join('\n');
+        const src = ['const result = await cds.ql`SELECT ID FROM Books                        `;', 'const [r1] = result;'].join('\n');
         const worker = fieldsWorker([{ label: 'ID', detail: 'cds.Integer' }]);
         const ctx = makeCtx(src, worker);
         const pos = src.indexOf('[r1]') + 1;
         const result = getCqlHover('test.ts', pos, ctx, TS);
-        assert.ok(
-            result,
-            'expected QuickInfo for array binding from cds.ql variable',
-        );
+        assert.ok(result, 'expected QuickInfo for array binding from cds.ql variable');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('r1'),
-            `hover must show variable name 'r1', got: ${text}`,
-        );
-        assert.ok(
-            text.includes('ID') && text.includes('number'),
-            `hover must show row type, got: ${text}`,
-        );
+        assert.ok(text.includes('r1'), `hover must show variable name 'r1', got: ${text}`);
+        assert.ok(text.includes('ID') && text.includes('number'), `hover must show row type, got: ${text}`);
     });
 
     it('hovering over direct array binding nests expand columns (single-row type)', () => {
-        const src =
-            'const [row] = await cds.ql`SELECT FROM Books { author { age } }`;\nexport {};';
+        const src = 'const [row] = await cds.ql`SELECT FROM Books { author { age } }`;\nexport {};';
         const expandBatch = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => {
@@ -3035,57 +2330,33 @@ describe('getCqlHover — proxy simulation', () => {
         const result = getCqlHover('test.ts', pos, ctx, TS);
         assert.ok(result, 'expected QuickInfo for array binding element');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('author') && text.includes('age'),
-            `single-row hover must nest expand, got: ${text}`,
-        );
-        assert.ok(
-            !/author:\s*unknown/.test(text),
-            `expand must not collapse to unknown, got: ${text}`,
-        );
+        assert.ok(text.includes('author') && text.includes('age'), `single-row hover must nest expand, got: ${text}`);
+        assert.ok(!/author:\s*unknown/.test(text), `expand must not collapse to unknown, got: ${text}`);
     });
 
     it('hovering over property access result.at(0)?.field returns field type', () => {
         // Use non-optional property access to avoid QuestionDotToken ambiguity in position
-        const src =
-            'const result = await cds.ql`SELECT ID FROM Books                        `;\nresult[0].ID;\nexport {};';
+        const src = 'const result = await cds.ql`SELECT ID FROM Books                        `;\nresult[0].ID;\nexport {};';
         const worker = fieldsWorker([{ label: 'ID', detail: 'cds.Integer' }]);
         const ctx = makeCtx(src, worker);
         // Position on 'ID' in result[0].ID
         const pos = src.lastIndexOf('.ID') + 1;
         const result2 = getCqlHover('test.ts', pos, ctx, TS);
-        assert.ok(
-            result2,
-            'expected QuickInfo for property access on cds.ql result',
-        );
+        assert.ok(result2, 'expected QuickInfo for property access on cds.ql result');
         const text = (result2.displayParts ?? []).map((p) => p.text).join('');
         assert.ok(text.includes('ID'), `hover must show 'ID', got: ${text}`);
-        assert.ok(
-            text.includes('number'),
-            `hover must show number type for cds.Integer, got: ${text}`,
-        );
+        assert.ok(text.includes('number'), `hover must show number type for cds.Integer, got: ${text}`);
     });
 
     it('hovering over optional chain result.at(0)?.field returns field type', () => {
-        const src =
-            'const result = await cds.ql`SELECT ID FROM Books                        `;\nresult.at(0)?.ID;\nexport {};';
+        const src = 'const result = await cds.ql`SELECT ID FROM Books                        `;\nresult.at(0)?.ID;\nexport {};';
         const worker = fieldsWorker([{ label: 'ID', detail: 'cds.Integer' }]);
         const ctx = makeCtx(src, worker);
         // Find the PropertyAccessExpression.name 'ID' start position in the property access
-        const origSf = TS.createSourceFile(
-            'test.ts',
-            src,
-            TS.ScriptTarget.Latest,
-            true,
-            TS.ScriptKind.TS,
-        );
+        const origSf = TS.createSourceFile('test.ts', src, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
         let idNamePos = -1;
         const findPae = (n) => {
-            if (
-                TS.isPropertyAccessExpression(n) &&
-                n.name.text === 'ID' &&
-                n.questionDotToken
-            ) {
+            if (TS.isPropertyAccessExpression(n) && n.name.text === 'ID' && n.questionDotToken) {
                 idNamePos = n.name.getStart(origSf);
             }
             TS.forEachChild(n, findPae);
@@ -3093,16 +2364,10 @@ describe('getCqlHover — proxy simulation', () => {
         findPae(origSf);
         assert.ok(idNamePos >= 0, 'should find ?. property access for ID');
         const result2 = getCqlHover('test.ts', idNamePos, ctx, TS);
-        assert.ok(
-            result2,
-            'expected QuickInfo for optional chain property access',
-        );
+        assert.ok(result2, 'expected QuickInfo for optional chain property access');
         const text = (result2.displayParts ?? []).map((p) => p.text).join('');
         assert.ok(text.includes('ID'), `hover must show 'ID', got: ${text}`);
-        assert.ok(
-            text.includes('number'),
-            `hover must show number type, got: ${text}`,
-        );
+        assert.ok(text.includes('number'), `hover must show number type, got: ${text}`);
     });
 });
 
@@ -3151,11 +2416,7 @@ describe('getCqlDiagnostics — proxy simulation', () => {
 
         // Diagnostic position must point to 'ghost' in the original source
         const diagStart = diag[0].start;
-        assert.equal(
-            src.slice(diagStart, diagStart + 5),
-            'ghost',
-            `diagnostic start must point to 'ghost' in original source, got: ${JSON.stringify(src.slice(diagStart, diagStart + 5))}`,
-        );
+        assert.equal(src.slice(diagStart, diagStart + 5), 'ghost', `diagnostic start must point to 'ghost' in original source, got: ${JSON.stringify(src.slice(diagStart, diagStart + 5))}`);
     });
 
     it('diagnostic length matches the token span', () => {
@@ -3176,11 +2437,7 @@ describe('getCqlDiagnostics — proxy simulation', () => {
 
         const ctx = makeCtx(src, worker);
         const diag = getCqlDiagnostics(ctx, TS);
-        assert.equal(
-            diag[0].length,
-            5,
-            'diagnostic length must match token length',
-        );
+        assert.equal(diag[0].length, 5, 'diagnostic length must match token length');
     });
 
     it('diagnostic code reflects the error kind and source is "cds"', () => {
@@ -3203,10 +2460,7 @@ describe('getCqlDiagnostics — proxy simulation', () => {
     });
 
     it('diagnostics from multiple templates are all returned', () => {
-        const src = [
-            'const q1 = cds.ql`SELECT ghost FROM Books`;',
-            'const q2 = cds.ql`SELECT phantom FROM Authors`;',
-        ].join('\n');
+        const src = ['const q1 = cds.ql`SELECT ghost FROM Books`;', 'const q2 = cds.ql`SELECT phantom FROM Authors`;'].join('\n');
 
         let callCount = 0;
         const worker = (_args, _log) => {
@@ -3225,19 +2479,12 @@ describe('getCqlDiagnostics — proxy simulation', () => {
 
         const ctx = makeCtx(src, worker);
         const diag = getCqlDiagnostics(ctx, TS);
-        assert.equal(
-            diag.length,
-            2,
-            'should return diagnostics for both templates',
-        );
+        assert.equal(diag.length, 2, 'should return diagnostics for both templates');
     });
 
     it('diagnostic position points to correct token even for second template on next line', () => {
         const q2 = 'SELECT phantom FROM Authors';
-        const src = [
-            'const q1 = cds.ql`SELECT id FROM Books`;',
-            `const q2 = cds.ql\`${q2}\`;`,
-        ].join('\n');
+        const src = ['const q1 = cds.ql`SELECT id FROM Books`;', `const q2 = cds.ql\`${q2}\`;`].join('\n');
 
         const phantomInQ2 = posOf(q2, 'phantom');
         const worker = (args, _log) => {
@@ -3259,17 +2506,11 @@ describe('getCqlDiagnostics — proxy simulation', () => {
         const ctx = makeCtx(src, worker);
         const diag = getCqlDiagnostics(ctx, TS);
 
-        const phantomDiag = diag.find((d) =>
-            d.messageText.toString().includes('phantom'),
-        );
+        const phantomDiag = diag.find((d) => d.messageText.toString().includes('phantom'));
         assert.ok(phantomDiag, 'expected diagnostic for phantom');
 
         const diagStart = phantomDiag.start;
-        assert.equal(
-            src.slice(diagStart, diagStart + 7),
-            'phantom',
-            `diagnostic should point to 'phantom' in original source`,
-        );
+        assert.equal(src.slice(diagStart, diagStart + 7), 'phantom', `diagnostic should point to 'phantom' in original source`);
     });
 });
 
@@ -3282,28 +2523,14 @@ describe('getCqlCompletionDetails — annotation insertion', () => {
         const src = 'const r = cds.ql`SELECT id FROM Books`';
         const ctx = makeCtx(src, EMPTY_WORKER);
         const pos = posOf(src, 'Books');
-        const result = getCqlCompletionDetails(
-            'test.ts',
-            pos,
-            'Books',
-            'ts:',
-            ctx,
-            TS,
-        );
+        const result = getCqlCompletionDetails('test.ts', pos, 'Books', 'ts:', ctx, TS);
         assert.equal(result, null);
     });
 
     it('returns null when cursor is not inside a template', () => {
         const src = 'console.log("hello");';
         const ctx = makeCtx(src, EMPTY_WORKER);
-        const result = getCqlCompletionDetails(
-            'test.ts',
-            0,
-            'Books',
-            'cds:Svc.Books',
-            ctx,
-            TS,
-        );
+        const result = getCqlCompletionDetails('test.ts', 0, 'Books', 'cds:Svc.Books', ctx, TS);
         assert.equal(result, null);
     });
 
@@ -3311,14 +2538,7 @@ describe('getCqlCompletionDetails — annotation insertion', () => {
         const src = 'const r = cds.ql`SELECT id FROM Books`';
         const ctx = makeCtx(src, EMPTY_WORKER);
         const pos = posOf(src, 'Books');
-        const result = getCqlCompletionDetails(
-            'test.ts',
-            pos,
-            'Books',
-            'cds:Books',
-            ctx,
-            TS,
-        );
+        const result = getCqlCompletionDetails('test.ts', pos, 'Books', 'cds:Books', ctx, TS);
         assert.equal(result, null);
     });
 
@@ -3326,14 +2546,7 @@ describe('getCqlCompletionDetails — annotation insertion', () => {
         const src = 'const r = cds.ql`SELECT id FROM Books`';
         const ctx = makeCtx(src, EMPTY_WORKER);
         const pos = posOf(src, 'Books');
-        const result = getCqlCompletionDetails(
-            'test.ts',
-            pos,
-            'Books',
-            'cds:Svc.Books',
-            ctx,
-            TS,
-        );
+        const result = getCqlCompletionDetails('test.ts', pos, 'Books', 'cds:Svc.Books', ctx, TS);
         assert.ok(result, 'expected CompletionEntryDetails');
         assert.ok(result.codeActions?.length, 'expected code actions');
     });
@@ -3342,20 +2555,10 @@ describe('getCqlCompletionDetails — annotation insertion', () => {
         const src = 'const r = cds.ql`SELECT id FROM Books`';
         const ctx = makeCtx(src, EMPTY_WORKER);
         const pos = posOf(src, 'Books');
-        const result = getCqlCompletionDetails(
-            'test.ts',
-            pos,
-            'Books',
-            'cds:Svc.Books',
-            ctx,
-            TS,
-        );
+        const result = getCqlCompletionDetails('test.ts', pos, 'Books', 'cds:Svc.Books', ctx, TS);
         assert.ok(result?.codeActions?.[0]);
         const change = result.codeActions[0].changes[0].textChanges[0];
-        assert.ok(
-            change.newText.includes('@cds-service Svc'),
-            `expected @cds-service Svc in annotation, got: ${change.newText}`,
-        );
+        assert.ok(change.newText.includes('@cds-service Svc'), `expected @cds-service Svc in annotation, got: ${change.newText}`);
         // Insertion at start of line (length 0 = pure insertion)
         assert.equal(change.span.length, 0);
     });
@@ -3366,27 +2569,11 @@ describe('getCqlCompletionDetails — annotation insertion', () => {
         const src = 'if (true) {\n  const r = cds.ql`SELECT id FROM Books`;\n}';
         const ctx = makeCtx(src, EMPTY_WORKER);
         const pos = posOf(src, 'Books');
-        const result = getCqlCompletionDetails(
-            'test.ts',
-            pos,
-            'Books',
-            'cds:Svc.Books',
-            ctx,
-            TS,
-        );
-        assert.ok(
-            result,
-            'expected CompletionEntryDetails for nested template',
-        );
-        assert.ok(
-            result.codeActions?.length,
-            'expected code action for nested template',
-        );
+        const result = getCqlCompletionDetails('test.ts', pos, 'Books', 'cds:Svc.Books', ctx, TS);
+        assert.ok(result, 'expected CompletionEntryDetails for nested template');
+        assert.ok(result.codeActions?.length, 'expected code action for nested template');
         const change = result.codeActions[0].changes[0].textChanges[0];
-        assert.ok(
-            change.newText.includes('@cds-service Svc'),
-            `expected annotation, got: ${change.newText}`,
-        );
+        assert.ok(change.newText.includes('@cds-service Svc'), `expected annotation, got: ${change.newText}`);
     });
 });
 
@@ -3396,13 +2583,7 @@ describe('getCqlCompletionDetails — annotation insertion', () => {
 
 describe('serviceAnnotationFor', () => {
     function annotationFor(src) {
-        const sf = TS.createSourceFile(
-            't.ts',
-            src,
-            TS.ScriptTarget.Latest,
-            true,
-            TS.ScriptKind.TS,
-        );
+        const sf = TS.createSourceFile('t.ts', src, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
         // find the first tagged template
         let tpl;
         function visit(n) {
@@ -3415,14 +2596,12 @@ describe('serviceAnnotationFor', () => {
     }
 
     it('returns service name from // @cds-service <Name>', () => {
-        const src =
-            '// @cds-service MyService\nconst r = cds.ql`SELECT id FROM Books`';
+        const src = '// @cds-service MyService\nconst r = cds.ql`SELECT id FROM Books`';
         assert.equal(annotationFor(src), 'MyService');
     });
 
     it('returns service name from // @cds.service: <Name> (dot-colon variant)', () => {
-        const src =
-            '// @cds.service: OtherService\nconst r = cds.ql`SELECT id FROM Books`';
+        const src = '// @cds.service: OtherService\nconst r = cds.ql`SELECT id FROM Books`';
         assert.equal(annotationFor(src), 'OtherService');
     });
 
@@ -3432,26 +2611,22 @@ describe('serviceAnnotationFor', () => {
     });
 
     it('returns undefined when annotation is two lines above (not immediately before)', () => {
-        const src =
-            '// @cds-service MyService\n\nconst r = cds.ql`SELECT id FROM Books`';
+        const src = '// @cds-service MyService\n\nconst r = cds.ql`SELECT id FROM Books`';
         assert.equal(annotationFor(src), undefined);
     });
 
     it('returns undefined when annotation comment is after the statement', () => {
-        const src =
-            'const r = cds.ql`SELECT id FROM Books`\n// @cds-service MyService';
+        const src = 'const r = cds.ql`SELECT id FROM Books`\n// @cds-service MyService';
         assert.equal(annotationFor(src), undefined);
     });
 
     it('ignores trailing whitespace on annotation line', () => {
-        const src =
-            '// @cds-service TrimMe   \nconst r = cds.ql`SELECT id FROM Books`';
+        const src = '// @cds-service TrimMe   \nconst r = cds.ql`SELECT id FROM Books`';
         assert.equal(annotationFor(src), 'TrimMe');
     });
 
     it('works with indented annotation and statement', () => {
-        const src =
-            'function f() {\n  // @cds-service Inner\n  const r = cds.ql`SELECT id FROM Books`\n}';
+        const src = 'function f() {\n  // @cds-service Inner\n  const r = cds.ql`SELECT id FROM Books`\n}';
         assert.equal(annotationFor(src), 'Inner');
     });
 });
@@ -3461,9 +2636,7 @@ describe('serviceAnnotationFor', () => {
 // ---------------------------------------------------------------------------
 
 describe('readConfig', () => {
-    function fakeRaw(
-        config,
-    ) {
+    function fakeRaw(config) {
         return config;
     }
 
@@ -3533,30 +2706,14 @@ describe('readConfig', () => {
         assert.equal(cfg['cds.ql.completion'], true);
         assert.equal(cfg['cds.ql.hover'], false);
         // Unknown keys must not leak into the resolved config
-        assert.equal(
-            cfg['schemaVersion'],
-            undefined,
-        );
-        assert.equal(
-            cfg['cds.ql.someFutureFlag'],
-            undefined,
-        );
+        assert.equal(cfg['schemaVersion'], undefined);
+        assert.equal(cfg['cds.ql.someFutureFlag'], undefined);
     });
 
     it('defaults debounceDelay when absent or non-numeric', () => {
         assert.equal(readConfig(fakeRaw({}))['cds.ql.debounceDelay'], 300);
-        assert.equal(
-            readConfig(fakeRaw({ 'cds.ql.debounceDelay': 'nope' }))[
-                'cds.ql.debounceDelay'
-            ],
-            300,
-        );
-        assert.equal(
-            readConfig(fakeRaw({ 'cds.ql.debounceDelay': 50 }))[
-                'cds.ql.debounceDelay'
-            ],
-            50,
-        );
+        assert.equal(readConfig(fakeRaw({ 'cds.ql.debounceDelay': 'nope' }))['cds.ql.debounceDelay'], 300);
+        assert.equal(readConfig(fakeRaw({ 'cds.ql.debounceDelay': 50 }))['cds.ql.debounceDelay'], 50);
     });
 });
 
@@ -3565,10 +2722,7 @@ describe('readConfig', () => {
 // ---------------------------------------------------------------------------
 
 describe('resolveQueryContext', () => {
-    function fakeInfo(
-        origText,
-        fileName,
-    ) {
+    function fakeInfo(origText, fileName) {
         return {
             config: {},
             project: {
@@ -3580,32 +2734,14 @@ describe('resolveQueryContext', () => {
     it('returns null when file has no cds.ql', () => {
         const originalSource = new Map([['t.ts', 'console.log("hi");']]);
         const info = fakeInfo(undefined, 't.ts');
-        const result = resolveQueryContext(
-            't.ts',
-            info,
-            TS,
-            originalSource,
-            EMPTY_WORKER,
-            EMPTY_BATCH_WORKER,
-            NO_LOGGER,
-            '/proj',
-        );
+        const result = resolveQueryContext('t.ts', info, TS, originalSource, EMPTY_WORKER, EMPTY_BATCH_WORKER, NO_LOGGER, '/proj');
         assert.equal(result, null);
     });
 
     it('returns null when file is not in originalSource and scriptInfo is absent', () => {
         const originalSource = new Map();
         const info = fakeInfo(undefined, 't.ts');
-        const result = resolveQueryContext(
-            't.ts',
-            info,
-            TS,
-            originalSource,
-            EMPTY_WORKER,
-            EMPTY_BATCH_WORKER,
-            NO_LOGGER,
-            '/proj',
-        );
+        const result = resolveQueryContext('t.ts', info, TS, originalSource, EMPTY_WORKER, EMPTY_BATCH_WORKER, NO_LOGGER, '/proj');
         assert.equal(result, null);
     });
 
@@ -3613,16 +2749,7 @@ describe('resolveQueryContext', () => {
         const src = 'const r = cds.ql`SELECT id FROM Books`';
         const originalSource = new Map([['t.ts', src]]);
         const info = fakeInfo(undefined, 't.ts');
-        const ctx = resolveQueryContext(
-            't.ts',
-            info,
-            TS,
-            originalSource,
-            EMPTY_WORKER,
-            EMPTY_BATCH_WORKER,
-            NO_LOGGER,
-            '/proj',
-        );
+        const ctx = resolveQueryContext('t.ts', info, TS, originalSource, EMPTY_WORKER, EMPTY_BATCH_WORKER, NO_LOGGER, '/proj');
         assert.ok(ctx, 'expected QueryContext');
         assert.equal(ctx.origText, src);
         assert.equal(ctx.projectRoot, '/proj');
@@ -3633,16 +2760,7 @@ describe('resolveQueryContext', () => {
         const src = 'const r = cds.ql`SELECT id FROM Books`';
         const originalSource = new Map([['t.js', src]]);
         const info = fakeInfo(undefined, 't.js');
-        const ctx = resolveQueryContext(
-            't.js',
-            info,
-            TS,
-            originalSource,
-            EMPTY_WORKER,
-            EMPTY_BATCH_WORKER,
-            NO_LOGGER,
-            '/proj',
-        );
+        const ctx = resolveQueryContext('t.js', info, TS, originalSource, EMPTY_WORKER, EMPTY_BATCH_WORKER, NO_LOGGER, '/proj');
         assert.ok(ctx, 'expected QueryContext for .js file');
         assert.equal(ctx.origSf.scriptKind, TS.ScriptKind.JS);
     });
@@ -3660,16 +2778,7 @@ describe('resolveQueryContext', () => {
             },
         };
         const originalSource = new Map(); // deliberately empty
-        const ctx = resolveQueryContext(
-            't.ts',
-            info,
-            TS,
-            originalSource,
-            EMPTY_WORKER,
-            EMPTY_BATCH_WORKER,
-            NO_LOGGER,
-            '/proj',
-        );
+        const ctx = resolveQueryContext('t.ts', info, TS, originalSource, EMPTY_WORKER, EMPTY_BATCH_WORKER, NO_LOGGER, '/proj');
         assert.ok(ctx, 'expected QueryContext from scriptInfo snap');
         assert.equal(ctx.origText, srcFromSnap);
     });
@@ -3682,40 +2791,18 @@ describe('resolveQueryContext', () => {
 describe('resolveToCdsQuery — property chain', () => {
     it('cursor on .at(0) resolves to the cds.ql declaration', () => {
         const src = 'const r = await cds.ql`SELECT id FROM Books`;\nr.at(0);';
-        const sf = TS.createSourceFile(
-            't.ts',
-            src,
-            TS.ScriptTarget.Latest,
-            true,
-            TS.ScriptKind.TS,
-        );
+        const sf = TS.createSourceFile('t.ts', src, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
         const pos = posOf(src, 'at');
         const resolved = resolveToCdsQuery(TS, sf, pos);
-        assert.ok(
-            resolved,
-            'expected resolveToCdsQuery to find template for .at access',
-        );
-        const tplText = src.slice(
-            resolved.template.pos,
-            resolved.template.end,
-        );
-        assert.ok(
-            tplText.includes('Books'),
-            'resolved template must be the Books query',
-        );
+        assert.ok(resolved, 'expected resolveToCdsQuery to find template for .at access');
+        const tplText = src.slice(resolved.template.pos, resolved.template.end);
+        assert.ok(tplText.includes('Books'), 'resolved template must be the Books query');
         assert.equal(resolved.awaited, true);
     });
 
     it('cursor on chained property (.at(0)?.id) resolves to the declaration', () => {
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books`;\nr.at(0)?.id;';
-        const sf = TS.createSourceFile(
-            't.ts',
-            src,
-            TS.ScriptTarget.Latest,
-            true,
-            TS.ScriptKind.TS,
-        );
+        const src = 'const r = await cds.ql`SELECT id FROM Books`;\nr.at(0)?.id;';
+        const sf = TS.createSourceFile('t.ts', src, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
         const pos = posOf(src, 'id', 1); // second 'id' — the chained access, not inside template
         const resolved = resolveToCdsQuery(TS, sf, pos);
         assert.ok(resolved, 'expected resolution for chained property access');
@@ -3723,26 +2810,14 @@ describe('resolveToCdsQuery — property chain', () => {
 
     it('cursor on identifier unrelated to cds.ql returns null', () => {
         const src = 'const foo = 42;\nfoo.toString();';
-        const sf = TS.createSourceFile(
-            't.ts',
-            src,
-            TS.ScriptTarget.Latest,
-            true,
-            TS.ScriptKind.TS,
-        );
+        const sf = TS.createSourceFile('t.ts', src, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
         const resolved = resolveToCdsQuery(TS, sf, posOf(src, 'foo'));
         assert.equal(resolved, null);
     });
 
     it('non-awaited declaration is reported as non-awaited', () => {
         const src = 'const r = cds.ql`SELECT id FROM Books`;\nr.then(x => x);';
-        const sf = TS.createSourceFile(
-            't.ts',
-            src,
-            TS.ScriptTarget.Latest,
-            true,
-            TS.ScriptKind.TS,
-        );
+        const sf = TS.createSourceFile('t.ts', src, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
         const resolved = resolveToCdsQuery(TS, sf, posOf(src, 'then'));
         assert.ok(resolved, 'expected resolution');
         assert.equal(resolved.awaited, false);
@@ -3766,18 +2841,9 @@ describe('getCqlHover — Case 2: SELECT column mapping', () => {
         const result = getCqlHover('test.ts', src.lastIndexOf('r'), ctx, TS);
         assert.ok(result, 'expected hover');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('id'),
-            'should include selected column id, got: ' + text,
-        );
-        assert.ok(
-            text.includes('title'),
-            'should include selected column title, got: ' + text,
-        );
-        assert.ok(
-            !text.includes('descr'),
-            'should NOT include unselected column descr, got: ' + text,
-        );
+        assert.ok(text.includes('id'), 'should include selected column id, got: ' + text);
+        assert.ok(text.includes('title'), 'should include selected column title, got: ' + text);
+        assert.ok(!text.includes('descr'), 'should NOT include unselected column descr, got: ' + text);
     });
 
     it('hover on result var with AS alias shows alias in type', () => {
@@ -3788,15 +2854,8 @@ describe('getCqlHover — Case 2: SELECT column mapping', () => {
         const result = getCqlHover('test.ts', src.lastIndexOf('r'), ctx, TS);
         assert.ok(result, 'expected hover');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('bookTitle'),
-            'alias bookTitle must appear in type, got: ' + text,
-        );
-        assert.ok(
-            !text.includes(': title'),
-            'original field name title must not appear as property, got: ' +
-                text,
-        );
+        assert.ok(text.includes('bookTitle'), 'alias bookTitle must appear in type, got: ' + text);
+        assert.ok(!text.includes(': title'), 'original field name title must not appear as property, got: ' + text);
     });
 
     it('hover on result var with SELECT * returns all non-association fields', () => {
@@ -3813,10 +2872,7 @@ describe('getCqlHover — Case 2: SELECT column mapping', () => {
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
         assert.ok(text.includes('id'), 'should include id, got: ' + text);
         assert.ok(text.includes('title'), 'should include title, got: ' + text);
-        assert.ok(
-            !text.includes('author'),
-            'should exclude association, got: ' + text,
-        );
+        assert.ok(!text.includes('author'), 'should exclude association, got: ' + text);
     });
 
     it('hover returns "unknown" when no fields match selected columns', () => {
@@ -3827,10 +2883,7 @@ describe('getCqlHover — Case 2: SELECT column mapping', () => {
         const result = getCqlHover('test.ts', src.lastIndexOf('r'), ctx, TS);
         assert.ok(result, 'expected hover even with no matching fields');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('unknown'),
-            'unresolved SELECT column must produce unknown type, got: ' + text,
-        );
+        assert.ok(text.includes('unknown'), 'unresolved SELECT column must produce unknown type, got: ' + text);
     });
 
     it('hover on .at(0) access on result variable resolves type', () => {
@@ -3841,10 +2894,7 @@ describe('getCqlHover — Case 2: SELECT column mapping', () => {
         const result = getCqlHover('test.ts', pos, ctx, TS);
         assert.ok(result, 'expected hover for .at access on result variable');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('id'),
-            'hover via .at() should show field type, got: ' + text,
-        );
+        assert.ok(text.includes('id'), 'hover via .at() should show field type, got: ' + text);
     });
 
     it('hover on result var with FQN entity (dot in name) uses empty prefix', () => {
@@ -3868,9 +2918,7 @@ describe('getCqlHover — Case 2: SELECT column mapping', () => {
         const posOnTemplate = src.indexOf('`');
         const result = getCqlHover('test.ts', posOnTemplate, ctx, TS);
         // May return null or a result — the important thing is it doesn't throw
-        assert.doesNotThrow(() =>
-            getCqlHover('test.ts', posOnTemplate, ctx, TS),
-        );
+        assert.doesNotThrow(() => getCqlHover('test.ts', posOnTemplate, ctx, TS));
     });
 
     // A batch worker modelling a Books→author→Authors association chain, so hover
@@ -3923,61 +2971,37 @@ describe('getCqlHover — Case 2: SELECT column mapping', () => {
     });
 
     it('hover on result var nests expand columns (author { age }) instead of unknown', () => {
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { author { age } }`;\nconsole.log(r);';
+        const src = 'const r = await cds.ql`SELECT FROM Books { author { age } }`;\nconsole.log(r);';
         const ctx = makeCtx(src, EMPTY_WORKER, '/proj', 'test.ts', expandBatch);
         const result = getCqlHover('test.ts', src.lastIndexOf('r'), ctx, TS);
         assert.ok(result, 'expected hover for result variable');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('author'),
-            `expected author in type, got: ${text}`,
-        );
-        assert.ok(
-            text.includes('age'),
-            `expected nested age in type, got: ${text}`,
-        );
-        assert.ok(
-            !/author:\s*unknown/.test(text),
-            `expand column must not collapse to unknown, got: ${text}`,
-        );
+        assert.ok(text.includes('author'), `expected author in type, got: ${text}`);
+        assert.ok(text.includes('age'), `expected nested age in type, got: ${text}`);
+        assert.ok(!/author:\s*unknown/.test(text), `expand column must not collapse to unknown, got: ${text}`);
     });
 
     it('hover on result var renders a bare association column as an implicit SELECT * expand', () => {
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { author }`;\nconsole.log(r);';
+        const src = 'const r = await cds.ql`SELECT FROM Books { author }`;\nconsole.log(r);';
         const ctx = makeCtx(src, EMPTY_WORKER, '/proj', 'test.ts', expandBatch);
         const result = getCqlHover('test.ts', src.lastIndexOf('r'), ctx, TS);
         assert.ok(result, 'expected hover');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('author'),
-            `expected author in type, got: ${text}`,
-        );
+        assert.ok(text.includes('author'), `expected author in type, got: ${text}`);
         // implicit SELECT * over the target → its scalar fields appear
-        assert.ok(
-            text.includes('name') && text.includes('age'),
-            `expected target fields name/age, got: ${text}`,
-        );
-        assert.ok(
-            !/author:\s*unknown/.test(text),
-            `bare association must not be unknown, got: ${text}`,
-        );
+        assert.ok(text.includes('name') && text.includes('age'), `expected target fields name/age, got: ${text}`);
+        assert.ok(!/author:\s*unknown/.test(text), `bare association must not be unknown, got: ${text}`);
     });
 
     it('hover on result var with only scalar columns still renders a flat row type', () => {
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { ID, title }`;\nconsole.log(r);';
+        const src = 'const r = await cds.ql`SELECT FROM Books { ID, title }`;\nconsole.log(r);';
         const ctx = makeCtx(src, EMPTY_WORKER, '/proj', 'test.ts', expandBatch);
         const result = getCqlHover('test.ts', src.lastIndexOf('r'), ctx, TS);
         assert.ok(result, 'expected hover');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
         assert.ok(text.includes('ID'), `expected ID, got: ${text}`);
         assert.ok(text.includes('title'), `expected title, got: ${text}`);
-        assert.ok(
-            !text.includes('unknown'),
-            `scalar row must not be unknown, got: ${text}`,
-        );
+        assert.ok(!text.includes('unknown'), `scalar row must not be unknown, got: ${text}`);
     });
 
     it('hover respects association cardinality (to-one scalar vs to-many array)', () => {
@@ -4031,30 +3055,14 @@ describe('getCqlHover — Case 2: SELECT column mapping', () => {
                 }),
             ),
         });
-        const src =
-            'const r = await cds.ql`SELECT FROM Books { author { age }, chapters { title } }`;\nconsole.log(r);';
-        const ctx = makeCtx(
-            src,
-            EMPTY_WORKER,
-            '/proj',
-            'test.ts',
-            cardinalityBatch,
-        );
+        const src = 'const r = await cds.ql`SELECT FROM Books { author { age }, chapters { title } }`;\nconsole.log(r);';
+        const ctx = makeCtx(src, EMPTY_WORKER, '/proj', 'test.ts', cardinalityBatch);
         const result = getCqlHover('test.ts', src.lastIndexOf('r'), ctx, TS);
         assert.ok(result, 'expected hover');
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('author:{age:number}'),
-            `to-one must be scalar object, got: ${text}`,
-        );
-        assert.ok(
-            !/author:\{age:number\}\[\]/.test(text),
-            `to-one must not be array, got: ${text}`,
-        );
-        assert.ok(
-            text.includes('chapters:{title:string}[]'),
-            `to-many must be array, got: ${text}`,
-        );
+        assert.ok(text.includes('author:{age:number}'), `to-one must be scalar object, got: ${text}`);
+        assert.ok(!/author:\{age:number\}\[\]/.test(text), `to-one must not be array, got: ${text}`);
+        assert.ok(text.includes('chapters:{title:string}[]'), `to-many must be array, got: ${text}`);
     });
 });
 
@@ -4121,10 +3129,7 @@ describe('resolveBaseType', () => {
     it('breaks cycles and returns last seen type', () => {
         const defs = { A: { type: 'B' }, B: { type: 'A' } };
         const result = resolveBaseType('A', defs);
-        assert.ok(
-            result === 'A' || result === 'B',
-            `expected A or B, got ${result}`,
-        );
+        assert.ok(result === 'A' || result === 'B', `expected A or B, got ${result}`);
     });
 
     it('getSuggestions uses resolveBaseType for user-defined field types', () => {
@@ -4140,11 +3145,7 @@ describe('resolveBaseType', () => {
         const items = getSuggestions('SELECT | FROM Svc.Books', 7, defs, 'Svc');
         const genre = items.find((i) => i.label === 'genre');
         assert.ok(genre, 'genre field must appear in completions');
-        assert.equal(
-            genre?.detail,
-            'cds.String',
-            `detail must be resolved primitive, got: ${genre?.detail}`,
-        );
+        assert.equal(genre?.detail, 'cds.String', `detail must be resolved primitive, got: ${genre?.detail}`);
     });
 });
 
@@ -4158,16 +3159,12 @@ describe('buildTypeString', () => {
     });
 
     it('ignores non-field entries when computing type', () => {
-        const cols = [
-            { label: 'Books', kind: 'entity', detail: 'Svc.Books' },
-        ];
+        const cols = [{ label: 'Books', kind: 'entity', detail: 'Svc.Books' }];
         assert.equal(buildTypeString(cols), 'unknown');
     });
 
     it('returns object type string for a single field', () => {
-        const cols = [
-            { label: 'id', kind: 'field', detail: 'cds.UUID' },
-        ];
+        const cols = [{ label: 'id', kind: 'field', detail: 'cds.UUID' }];
         assert.equal(buildTypeString(cols), '{ id: string }[]');
     });
 
@@ -4234,18 +3231,12 @@ describe('extractSourceRelations — implicit alias', () => {
     it('handles implicit alias (entity identifier immediately follows entity name)', () => {
         // "FROM Books b" — b is an implicit alias, no AS keyword
         const tokens = tokenizeCql('SELECT b.id FROM Books b WHERE b.id = 1');
-        const sig = tokens.filter(
-            (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-        );
+        const sig = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
         const sources = extractSourceRelations(sig);
         assert.ok(sources.length > 0, 'expected at least one source');
         const booksSource = sources.find((s) => s.entity === 'Books');
         assert.ok(booksSource, 'expected Books entity in sources');
-        assert.equal(
-            booksSource.ref,
-            'b',
-            'implicit alias b must be used as ref',
-        );
+        assert.equal(booksSource.ref, 'b', 'implicit alias b must be used as ref');
     });
 });
 
@@ -4261,11 +3252,7 @@ describe('getSuggestions — unknown clause returns empty', () => {
         const cursor = 0; // before SELECT — unknown clause
         const defs_ = defs({ Books: { id: 'cds.UUID' } });
         const suggestions = getSuggestions(query, cursor, defs_, undefined);
-        assert.deepEqual(
-            suggestions,
-            [],
-            'before-SELECT position must return no suggestions',
-        );
+        assert.deepEqual(suggestions, [], 'before-SELECT position must return no suggestions');
     });
 });
 
@@ -4282,15 +3269,8 @@ describe('getSuggestions — FQN entity name with dot resolves via direct defs l
         });
         const suggestions = getSuggestions(query, cursor, defs_, undefined);
         const labels = suggestions.map((s) => s.label);
-        assert.ok(
-            labels.includes('id'),
-            'FQN entity must resolve — id expected, got: ' + labels.join(', '),
-        );
-        assert.ok(
-            labels.includes('title'),
-            'FQN entity must resolve — title expected, got: ' +
-                labels.join(', '),
-        );
+        assert.ok(labels.includes('id'), 'FQN entity must resolve — id expected, got: ' + labels.join(', '));
+        assert.ok(labels.includes('title'), 'FQN entity must resolve — title expected, got: ' + labels.join(', '));
     });
 });
 
@@ -4304,18 +3284,9 @@ describe('validateCqlQuery — JOIN variants and implicit alias', () => {
             Books: { id: 'cds.UUID' },
             Authors: { id: 'cds.UUID' },
         });
-        const errs = validateCqlQuery(
-            'SELECT b.id FROM Books b RIGHT JOIN Authors a ON b.id = a.id',
-            d,
-        );
-        const entityErrs = errs.filter(
-            (e) => e.code === CqlDiagnosticCode.UnknownEntity,
-        );
-        assert.deepEqual(
-            entityErrs,
-            [],
-            'RIGHT JOIN must not produce unknown-entity errors',
-        );
+        const errs = validateCqlQuery('SELECT b.id FROM Books b RIGHT JOIN Authors a ON b.id = a.id', d);
+        const entityErrs = errs.filter((e) => e.code === CqlDiagnosticCode.UnknownEntity);
+        assert.deepEqual(entityErrs, [], 'RIGHT JOIN must not produce unknown-entity errors');
     });
 
     it('accepts FULL JOIN without error', () => {
@@ -4323,18 +3294,9 @@ describe('validateCqlQuery — JOIN variants and implicit alias', () => {
             Books: { id: 'cds.UUID' },
             Authors: { id: 'cds.UUID' },
         });
-        const errs = validateCqlQuery(
-            'SELECT b.id FROM Books b FULL JOIN Authors a ON b.id = a.id',
-            d,
-        );
-        const entityErrs = errs.filter(
-            (e) => e.code === CqlDiagnosticCode.UnknownEntity,
-        );
-        assert.deepEqual(
-            entityErrs,
-            [],
-            'FULL JOIN must not produce unknown-entity errors',
-        );
+        const errs = validateCqlQuery('SELECT b.id FROM Books b FULL JOIN Authors a ON b.id = a.id', d);
+        const entityErrs = errs.filter((e) => e.code === CqlDiagnosticCode.UnknownEntity);
+        assert.deepEqual(entityErrs, [], 'FULL JOIN must not produce unknown-entity errors');
     });
 
     it('accepts CROSS JOIN without error', () => {
@@ -4342,18 +3304,9 @@ describe('validateCqlQuery — JOIN variants and implicit alias', () => {
             Books: { id: 'cds.UUID' },
             Authors: { id: 'cds.UUID' },
         });
-        const errs = validateCqlQuery(
-            'SELECT b.id FROM Books b CROSS JOIN Authors a ON b.id = a.id',
-            d,
-        );
-        const entityErrs = errs.filter(
-            (e) => e.code === CqlDiagnosticCode.UnknownEntity,
-        );
-        assert.deepEqual(
-            entityErrs,
-            [],
-            'CROSS JOIN must not produce unknown-entity errors',
-        );
+        const errs = validateCqlQuery('SELECT b.id FROM Books b CROSS JOIN Authors a ON b.id = a.id', d);
+        const entityErrs = errs.filter((e) => e.code === CqlDiagnosticCode.UnknownEntity);
+        assert.deepEqual(entityErrs, [], 'CROSS JOIN must not produce unknown-entity errors');
     });
 
     it('resolves implicit alias in entity scan (no AS keyword after JOIN)', () => {
@@ -4362,19 +3315,9 @@ describe('validateCqlQuery — JOIN variants and implicit alias', () => {
             Books: { id: 'cds.UUID', title: 'cds.String' },
             Authors: { id: 'cds.UUID', name: 'cds.String' },
         });
-        const errs = validateCqlQuery(
-            'SELECT b.id, a.name FROM Books b LEFT JOIN Authors a ON b.id = a.id',
-            d,
-        );
-        const fieldErrs = errs.filter(
-            (e) => e.code === CqlDiagnosticCode.UnknownField,
-        );
-        assert.deepEqual(
-            fieldErrs,
-            [],
-            'implicit alias must resolve — got errors: ' +
-                JSON.stringify(fieldErrs),
-        );
+        const errs = validateCqlQuery('SELECT b.id, a.name FROM Books b LEFT JOIN Authors a ON b.id = a.id', d);
+        const fieldErrs = errs.filter((e) => e.code === CqlDiagnosticCode.UnknownField);
+        assert.deepEqual(fieldErrs, [], 'implicit alias must resolve — got errors: ' + JSON.stringify(fieldErrs));
     });
 });
 
@@ -4401,12 +3344,8 @@ describe('getCqlHover — field documentation (doc property)', () => {
         const ctx = makeCtx(src, worker);
         const result = getCqlHover('test.ts', posInSrc, ctx, TS);
         assert.ok(result, 'expected hover result');
-        const docText =
-            result.documentation?.map((p) => p.text).join('') ?? '';
-        assert.ok(
-            docText.includes('Primary key'),
-            'doc text must appear in hover documentation, got: ' + docText,
-        );
+        const docText = result.documentation?.map((p) => p.text).join('') ?? '';
+        assert.ok(docText.includes('Primary key'), 'doc text must appear in hover documentation, got: ' + docText);
     });
 
     it('includes entity source in hover documentation', () => {
@@ -4427,12 +3366,8 @@ describe('getCqlHover — field documentation (doc property)', () => {
         const ctx = makeCtx(src, worker);
         const result = getCqlHover('test.ts', posInSrc, ctx, TS);
         assert.ok(result, 'expected hover result');
-        const docText =
-            result.documentation?.map((p) => p.text).join('') ?? '';
-        assert.ok(
-            docText.includes('Svc.Books'),
-            'entity source must appear in documentation, got: ' + docText,
-        );
+        const docText = result.documentation?.map((p) => p.text).join('') ?? '';
+        assert.ok(docText.includes('Svc.Books'), 'entity source must appear in documentation, got: ' + docText);
     });
 });
 
@@ -4460,21 +3395,12 @@ describe('getCqlCompletions — entity completion with FQN source', () => {
         assert.ok(result, 'expected completions');
         const entry = result.entries.find((e) => e.name === 'Books');
         assert.ok(entry, 'Books entry must be present');
-        assert.equal(
-            entry.hasAction,
-            true,
-            'entity without prefix must have hasAction=true',
-        );
-        assert.equal(
-            entry.source,
-            'cds:Svc.Books',
-            'entity source must be cds:FQN',
-        );
+        assert.equal(entry.hasAction, true, 'entity without prefix must have hasAction=true');
+        assert.equal(entry.source, 'cds:Svc.Books', 'entity source must be cds:FQN');
     });
 
     it('entity completion with prefix does NOT get hasAction (annotation already present)', () => {
-        const src =
-            '// @cds-service Svc\nconst r = cds.ql`SELECT id FROM Books`';
+        const src = '// @cds-service Svc\nconst r = cds.ql`SELECT id FROM Books`';
         const posInSrc = posOf(src, 'Books');
 
         const worker = (_args, _logger) => ({
@@ -4491,10 +3417,7 @@ describe('getCqlCompletions — entity completion with FQN source', () => {
         assert.ok(result, 'expected completions');
         const entry = result.entries.find((e) => e.name === 'Books');
         assert.ok(entry, 'Books entry must be present');
-        assert.ok(
-            !entry.hasAction,
-            'entity with prefix must NOT have hasAction (no annotation needed)',
-        );
+        assert.ok(!entry.hasAction, 'entity with prefix must NOT have hasAction (no annotation needed)');
     });
 
     it('field completion with empty detail sets labelDetails to undefined', () => {
@@ -4508,11 +3431,7 @@ describe('getCqlCompletions — entity completion with FQN source', () => {
         assert.ok(result, 'expected completions');
         const entry = result.entries.find((e) => e.name === 'id');
         assert.ok(entry, 'id entry must be present');
-        assert.equal(
-            entry.labelDetails,
-            undefined,
-            'labelDetails must be undefined for empty detail',
-        );
+        assert.equal(entry.labelDetails, undefined, 'labelDetails must be undefined for empty detail');
     });
 });
 
@@ -4525,14 +3444,7 @@ describe('getCqlCompletionDetails — no template at position', () => {
         const src = 'const r = cds.ql`SELECT id FROM Books`;\nexport {};';
         const ctx = makeCtx(src, EMPTY_WORKER);
         // Position on 'export' — outside any template
-        const result = getCqlCompletionDetails(
-            'test.ts',
-            posOf(src, 'export'),
-            'Books',
-            'cds:Svc.Books',
-            ctx,
-            TS,
-        );
+        const result = getCqlCompletionDetails('test.ts', posOf(src, 'export'), 'Books', 'cds:Svc.Books', ctx, TS);
         assert.equal(result, null);
     });
 });
@@ -4546,15 +3458,9 @@ describe('rewriteSnapshot — JS budget-exceeded skip', () => {
         // Declaration on line 100 → alias _q100 → jsCast " = (/**@type{_q100}*/({}))" = 26 chars.
         // Initializer span "=cds.ql`SELECT a FROM B`" = 24 chars → 26 > 24 → skip.
         const src = '\n'.repeat(100) + 'var x=cds.ql`SELECT a FROM B`';
-        const worker = fieldsBatchWorker([
-            { label: 'a', detail: 'cds.String' },
-        ]);
+        const worker = fieldsBatchWorker([{ label: 'a', detail: 'cds.String' }]);
         const rw = rewrite(src, worker, 'test.js');
-        assert.equal(
-            rw,
-            src,
-            'source must be unchanged when JS cast does not fit in budget',
-        );
+        assert.equal(rw, src, 'source must be unchanged when JS cast does not fit in budget');
     });
 });
 
@@ -4581,14 +3487,7 @@ function typeCheckJs(fileName, source) {
     const host = TS.createCompilerHost(options, true);
     const origGetSourceFile = host.getSourceFile.bind(host);
     host.getSourceFile = (name, langVersion, onError, shouldCreate) => {
-        if (name === fileName)
-            return TS.createSourceFile(
-                name,
-                source,
-                langVersion,
-                true,
-                TS.ScriptKind.JS,
-            );
+        if (name === fileName) return TS.createSourceFile(name, source, langVersion, true, TS.ScriptKind.JS);
         return origGetSourceFile(name, langVersion, onError, shouldCreate);
     };
     const origFileExists = host.fileExists.bind(host);
@@ -4630,16 +3529,10 @@ describe('rewriteSnapshot — JS cast type-checks clean under checkJs', () => {
             const src = `const r = await cds.ql\`${query}\`\nconst use = r`;
             const worker = fieldsBatchWorker(fields);
             const rw = rewrite(src, worker, 'svc.js');
-            assert.ok(
-                rw.includes('@type'),
-                'expected a JSDoc @type cast to be injected',
-            );
+            assert.ok(rw.includes('@type'), 'expected a JSDoc @type cast to be injected');
 
             const codes = typeCheckJs('svc.js', rw);
-            assert.ok(
-                !codes.includes(2352),
-                `rewritten JS must not trip TS2352; got codes [${codes.join(', ')}]`,
-            );
+            assert.ok(!codes.includes(2352), `rewritten JS must not trip TS2352; got codes [${codes.join(', ')}]`);
         });
     }
 });
@@ -4662,25 +3555,9 @@ describe('resolveQueryContext — scriptInfo without __cdsOrigSnap', () => {
             },
         };
 
-        const ctx = resolveQueryContext(
-            't.ts',
-            info,
-            TS,
-            originalSource,
-            EMPTY_WORKER,
-            EMPTY_BATCH_WORKER,
-            NO_LOGGER,
-            '/proj',
-        );
-        assert.ok(
-            ctx,
-            'expected QueryContext when scriptInfo has no __cdsOrigSnap',
-        );
-        assert.equal(
-            ctx.origText,
-            src,
-            'must fall back to originalSource map',
-        );
+        const ctx = resolveQueryContext('t.ts', info, TS, originalSource, EMPTY_WORKER, EMPTY_BATCH_WORKER, NO_LOGGER, '/proj');
+        assert.ok(ctx, 'expected QueryContext when scriptInfo has no __cdsOrigSnap');
+        assert.equal(ctx.origText, src, 'must fall back to originalSource map');
     });
 });
 
@@ -4691,13 +3568,8 @@ describe('resolveQueryContext — scriptInfo without __cdsOrigSnap', () => {
 describe('tokenizeCql — quoted identifier', () => {
     it('parses double-quoted identifier as identifier token', () => {
         const tokens = tokenizeCql('SELECT "my field" FROM Books');
-        const quoted = tokens.find(
-            (t) => t.kind === 'identifier' && t.value === 'my field',
-        );
-        assert.ok(
-            quoted,
-            'double-quoted "my field" must become an identifier token',
-        );
+        const quoted = tokens.find((t) => t.kind === 'identifier' && t.value === 'my field');
+        assert.ok(quoted, 'double-quoted "my field" must become an identifier token');
         assert.equal(quoted.value, 'my field');
     });
 
@@ -4705,11 +3577,7 @@ describe('tokenizeCql — quoted identifier', () => {
         const tokens = tokenizeCql('"Title"');
         const id = tokens.find((t) => t.kind === 'identifier');
         assert.ok(id, 'expected identifier token');
-        assert.equal(
-            id.value,
-            'Title',
-            'value must not include the surrounding quotes',
-        );
+        assert.equal(id.value, 'Title', 'value must not include the surrounding quotes');
     });
 });
 
@@ -4736,34 +3604,18 @@ describe('tokenizeCql — unknown token', () => {
 describe('extractTemplateText — template with interpolation spans', () => {
     it('concatenates head and span literal texts with spaces for interpolated template', () => {
         const src = 'const r = cds.ql`SELECT ${someExpr} FROM Books`';
-        const sf = TS.createSourceFile(
-            't.ts',
-            src,
-            TS.ScriptTarget.Latest,
-            true,
-        );
+        const sf = TS.createSourceFile('t.ts', src, TS.ScriptTarget.Latest, true);
         const assignments = collectCqlAssignments(TS, sf);
-        assert.ok(
-            assignments.length > 0,
-            'expected at least one cds.ql assignment',
-        );
+        assert.ok(assignments.length > 0, 'expected at least one cds.ql assignment');
         const tplNode = assignments[0].template;
         const text = extractTemplateText(TS, tplNode);
         assert.ok(text.includes('SELECT'), 'result must include SELECT');
-        assert.ok(
-            text.includes('FROM Books'),
-            'result must include FROM Books',
-        );
+        assert.ok(text.includes('FROM Books'), 'result must include FROM Books');
     });
 
     it('returns just the template text for no-substitution template', () => {
         const src = 'const r = cds.ql`SELECT id FROM Books`';
-        const sf = TS.createSourceFile(
-            't.ts',
-            src,
-            TS.ScriptTarget.Latest,
-            true,
-        );
+        const sf = TS.createSourceFile('t.ts', src, TS.ScriptTarget.Latest, true);
         const assignments = collectCqlAssignments(TS, sf);
         const tplNode = assignments[0].template;
         const text = extractTemplateText(TS, tplNode);
@@ -4798,27 +3650,21 @@ describe('getCqlHover — Case 1 cursor on keyword returns null', () => {
 
 describe('tokenizeCql — string literals and quoted identifiers', () => {
     it('tokenizes single-quoted string literal', () => {
-        const tokens = tokenizeCql(
-            "SELECT id FROM Books WHERE title = 'hello world'",
-        );
+        const tokens = tokenizeCql("SELECT id FROM Books WHERE title = 'hello world'");
         const str = tokens.find((t) => t.kind === 'string');
         assert.ok(str, 'expected string token');
         assert.equal(str.value, "'hello world'");
     });
 
     it('handles escaped quote inside string literal', () => {
-        const tokens = tokenizeCql(
-            "SELECT id FROM Books WHERE title = 'it\\'s here'",
-        );
+        const tokens = tokenizeCql("SELECT id FROM Books WHERE title = 'it\\'s here'");
         const str = tokens.find((t) => t.kind === 'string');
         assert.ok(str, 'expected string token with escaped quote');
     });
 
     it('tokenizes double-quoted identifier', () => {
         const tokens = tokenizeCql('SELECT "myField" FROM Books');
-        const ident = tokens.find(
-            (t) => t.kind === 'identifier' && t.value === 'myField',
-        );
+        const ident = tokens.find((t) => t.kind === 'identifier' && t.value === 'myField');
         assert.ok(ident, 'expected identifier token from double-quoted string');
     });
 });
@@ -4833,11 +3679,7 @@ describe('getCursorClause — from-source and depth branches', () => {
         const query = 'SELECT id FROM Books ';
         const tokens = tokenizeCql(query);
         const clause = getCursorClause(tokens, query.length);
-        assert.equal(
-            clause.kind,
-            'from-source',
-            'after entity name in FROM clause returns from-source',
-        );
+        assert.equal(clause.kind, 'from-source', 'after entity name in FROM clause returns from-source');
     });
 
     it('resolves AS alias in from-source', () => {
@@ -4879,9 +3721,7 @@ describe('getCursorClause — from-source and depth branches', () => {
 describe('extractSourceRelations — punctuation flushes pendingEntity', () => {
     it('flushes pending entity when a punctuation token follows entity name', () => {
         const tokens = tokenizeCql('SELECT id FROM Books, Authors');
-        const sig = tokens.filter(
-            (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-        );
+        const sig = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
         const sources = extractSourceRelations(sig);
         const names = sources.map((s) => s.entity);
         assert.ok(names.includes('Books'), 'Books must be a source');
@@ -4937,11 +3777,7 @@ describe('getSuggestions — doc annotation fallbacks', () => {
         const q = 'SELECT  FROM NoSuchEntity';
         const cursor = 'SELECT '.length;
         const items = getSuggestions(q, cursor, d);
-        assert.equal(
-            items.length,
-            0,
-            'no items when source cannot be resolved',
-        );
+        assert.equal(items.length, 0, 'no items when source cannot be resolved');
     });
 });
 
@@ -4960,25 +3796,15 @@ describe('validateCqlQuery — AS alias and ORDER BY', () => {
                 },
             },
         };
-        const errs = validateCqlQuery(
-            'SELECT b.id FROM Books AS b ORDER BY b.id',
-            d,
-        );
-        assert.equal(
-            errs.length,
-            0,
-            'no errors for valid aliased query with ORDER BY',
-        );
+        const errs = validateCqlQuery('SELECT b.id FROM Books AS b ORDER BY b.id', d);
+        assert.equal(errs.length, 0, 'no errors for valid aliased query with ORDER BY');
     });
 
     it('reports unknown field in ORDER BY clause', () => {
         const d = {
             Books: { kind: 'entity', elements: { id: { type: 'cds.UUID' } } },
         };
-        const errs = validateCqlQuery(
-            'SELECT id FROM Books ORDER BY missingField',
-            d,
-        );
+        const errs = validateCqlQuery('SELECT id FROM Books ORDER BY missingField', d);
         assert.ok(
             errs.some((e) => e.message.includes('missingField')),
             'must flag unknown field in ORDER BY',
@@ -4996,11 +3822,7 @@ describe('getTokenContext — identifier not in significant (string token at cur
         const query = "SELECT 'hello' FROM Books";
         const cursorInsideString = query.indexOf("'hello'") + 3;
         const result = getTokenContext(query, cursorInsideString, {});
-        assert.equal(
-            result,
-            null,
-            'no context for cursor inside a string literal',
-        );
+        assert.equal(result, null, 'no context for cursor inside a string literal');
     });
 });
 
@@ -5018,10 +3840,7 @@ describe('getSuggestions — from-source skips deeply nested FQN', () => {
         const items = getSuggestions(q, q.length, d, 'Svc');
         const labels = items.map((i) => i.label);
         assert.ok(labels.includes('Books'), 'Books (no sub-dot) must appear');
-        assert.ok(
-            !labels.includes('Books.Edition'),
-            'Books.Edition (sub-dot) must be skipped',
-        );
+        assert.ok(!labels.includes('Books.Edition'), 'Books.Edition (sub-dot) must be skipped');
     });
 });
 
@@ -5044,11 +3863,7 @@ describe('validateCqlQuery — star and end-of-tokens pendingEntity flush', () =
             Books: { kind: 'entity', elements: { id: { type: 'cds.UUID' } } },
         };
         const errs = validateCqlQuery('SELECT id FROM Books', d);
-        assert.equal(
-            errs.length,
-            0,
-            'entity at end of token list must not cause errors',
-        );
+        assert.equal(errs.length, 0, 'entity at end of token list must not cause errors');
     });
 
     it('validateCqlQuery detects ambiguous field across two joined entities', () => {
@@ -5056,10 +3871,7 @@ describe('validateCqlQuery — star and end-of-tokens pendingEntity flush', () =
             Books: { kind: 'entity', elements: { id: { type: 'cds.UUID' } } },
             Authors: { kind: 'entity', elements: { id: { type: 'cds.UUID' } } },
         };
-        const errs = validateCqlQuery(
-            'SELECT id FROM Books JOIN Authors ON Books.id = Authors.id',
-            d,
-        );
+        const errs = validateCqlQuery('SELECT id FROM Books JOIN Authors ON Books.id = Authors.id', d);
         assert.ok(
             errs.some((e) => e.message.includes('Ambiguous')),
             'ambiguous id must be flagged',
@@ -5080,13 +3892,7 @@ describe('runWorkerMain — direct invocation', () => {
 
     it('returns error when arguments are missing', async () => {
         const out = [];
-        await runWorkerMain(
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            collect(out),
-        );
+        await runWorkerMain(undefined, undefined, undefined, undefined, collect(out));
         assert.equal(out[0]?.error, 'missing arguments');
     });
 
@@ -5096,18 +3902,9 @@ describe('runWorkerMain — direct invocation', () => {
         workerTestOverrides.globalRoots = () => [];
         try {
             const out = [];
-            await runWorkerMain(
-                '/no-such-dir',
-                'SELECT id FROM Books',
-                '7',
-                '',
-                collect(out),
-            );
+            await runWorkerMain('/no-such-dir', 'SELECT id FROM Books', '7', '', collect(out));
             assert.ok(out[0]?.error, 'expected an error');
-            assert.ok(
-                out[0].error.includes('@sap/cds'),
-                `expected @sap/cds error, got: ${out[0].error}`,
-            );
+            assert.ok(out[0].error.includes('@sap/cds'), `expected @sap/cds error, got: ${out[0].error}`);
         } finally {
             delete workerTestOverrides.globalRoots;
         }
@@ -5115,35 +3912,17 @@ describe('runWorkerMain — direct invocation', () => {
 
     it('returns completions when @sap/cds is available and cursor >= 0', async () => {
         const out = [];
-        await runWorkerMain(
-            repoRoot,
-            'SELECT  FROM Books',
-            '7',
-            '',
-            collect(out),
-        );
+        await runWorkerMain(repoRoot, 'SELECT  FROM Books', '7', '', collect(out));
         // cds.load may fail (no .cds model) or succeed with empty completions — either way, no missing-args error
         assert.notEqual(out[0]?.error, 'missing arguments');
-        assert.ok(
-            'completions' in (out[0] ?? {}) || 'error' in (out[0] ?? {}),
-            'expected completions or error key',
-        );
+        assert.ok('completions' in (out[0] ?? {}) || 'error' in (out[0] ?? {}), 'expected completions or error key');
     });
 
     it('returns diagnostics when @sap/cds is available and cursor = -1', async () => {
         const out = [];
-        await runWorkerMain(
-            repoRoot,
-            'SELECT id FROM Books',
-            '-1',
-            '',
-            collect(out),
-        );
+        await runWorkerMain(repoRoot, 'SELECT id FROM Books', '-1', '', collect(out));
         assert.notEqual(out[0]?.error, 'missing arguments');
-        assert.ok(
-            'diagnostics' in (out[0] ?? {}) || 'error' in (out[0] ?? {}),
-            'expected diagnostics or error key',
-        );
+        assert.ok('diagnostics' in (out[0] ?? {}) || 'error' in (out[0] ?? {}), 'expected diagnostics or error key');
     });
 });
 
@@ -5174,16 +3953,9 @@ describe('runBatchWorkerMain — direct invocation', () => {
         workerTestOverrides.globalRoots = () => [];
         try {
             const out = [];
-            await runBatchWorkerMain(
-                '/no-such-dir',
-                JSON.stringify([{ entity: 'Books', prefix: '' }]),
-                collect(out),
-            );
+            await runBatchWorkerMain('/no-such-dir', JSON.stringify([{ entity: 'Books', prefix: '' }]), collect(out));
             assert.ok(out[0]?.error, 'expected an error');
-            assert.ok(
-                out[0].error.includes('@sap/cds'),
-                `expected @sap/cds error, got: ${out[0].error}`,
-            );
+            assert.ok(out[0].error.includes('@sap/cds'), `expected @sap/cds error, got: ${out[0].error}`);
         } finally {
             delete workerTestOverrides.globalRoots;
         }
@@ -5191,16 +3963,9 @@ describe('runBatchWorkerMain — direct invocation', () => {
 
     it('returns fields map when @sap/cds is available', async () => {
         const out = [];
-        await runBatchWorkerMain(
-            repoRoot,
-            JSON.stringify([{ entity: 'Books', prefix: '' }]),
-            collect(out),
-        );
+        await runBatchWorkerMain(repoRoot, JSON.stringify([{ entity: 'Books', prefix: '' }]), collect(out));
         assert.notEqual(out[0]?.error, 'missing arguments');
-        assert.ok(
-            'fields' in (out[0] ?? {}),
-            'expected fields key in batch result',
-        );
+        assert.ok('fields' in (out[0] ?? {}), 'expected fields key in batch result');
     });
 });
 
@@ -5232,8 +3997,7 @@ describe('parseCqlColumns', () => {
 
     it('handles multi-line query with AS alias and bare identifiers on adjacent lines', () => {
         // Regression: `descr\ntitle AS bookTitle` must NOT treat `title` as an implicit alias of `descr`
-        const q =
-            'SELECT\n  ID, descr\n  title AS bookTitle\n  ,localized\nFROM Books\nWHERE ID = 42';
+        const q = 'SELECT\n  ID, descr\n  title AS bookTitle\n  ,localized\nFROM Books\nWHERE ID = 42';
         const result = parseCqlColumns(q);
         assert.deepEqual(result, [
             { field: 'ID', alias: 'ID' },
@@ -5259,33 +4023,17 @@ describe('parseCqlColumns', () => {
     it('ignores the invalid FROM-before-SELECT ordering (flat list)', () => {
         // `FROM Entity SELECT …` is NOT valid CQL (SELECT must come first). The parser
         // does not attempt to parse it → no columns, type inference degrades to unknown.
-        assert.deepEqual(
-            parseCqlColumns('FROM AdminService.Authors SELECT books'),
-            [],
-        );
-        assert.deepEqual(
-            parseCqlColumns('FROM Books SELECT ID, title AS t'),
-            [],
-        );
+        assert.deepEqual(parseCqlColumns('FROM AdminService.Authors SELECT books'), []);
+        assert.deepEqual(parseCqlColumns('FROM Books SELECT ID, title AS t'), []);
     });
 
     it('ignores the invalid FROM-before-SELECT ordering (brace projection)', () => {
-        assert.deepEqual(
-            parseCqlColumns('FROM Books SELECT { ID, title }'),
-            [],
-        );
-        assert.deepEqual(
-            parseCqlColumns(
-                'FROM AdminService.Books SELECT { genre, author { age } }',
-            ),
-            [],
-        );
+        assert.deepEqual(parseCqlColumns('FROM Books SELECT { ID, title }'), []);
+        assert.deepEqual(parseCqlColumns('FROM AdminService.Books SELECT { genre, author { age } }'), []);
     });
 
     it('parses single-level expand block', () => {
-        const result = parseCqlColumns(
-            'SELECT FROM Books { ID, author { name } }',
-        );
+        const result = parseCqlColumns('SELECT FROM Books { ID, author { name } }');
         assert.deepEqual(result, [
             { field: 'ID', alias: 'ID' },
             {
@@ -5297,9 +4045,7 @@ describe('parseCqlColumns', () => {
     });
 
     it('parses nested expand block', () => {
-        const result = parseCqlColumns(
-            'SELECT FROM Books { ID, author { name, address { street } } }',
-        );
+        const result = parseCqlColumns('SELECT FROM Books { ID, author { name, address { street } } }');
         assert.deepEqual(result, [
             { field: 'ID', alias: 'ID' },
             {
@@ -5318,9 +4064,7 @@ describe('parseCqlColumns', () => {
     });
 
     it('parses inline dot-expand syntax', () => {
-        const result = parseCqlColumns(
-            'SELECT FROM Books { ID, author.{ name } }',
-        );
+        const result = parseCqlColumns('SELECT FROM Books { ID, author.{ name } }');
         assert.deepEqual(result, [
             { field: 'ID', alias: 'ID' },
             {
@@ -5338,9 +4082,7 @@ describe('parseCqlColumns', () => {
     it('parses aliased expand block (assoc AS alias { … })', () => {
         // Regression: `address as residence { street }` must nest `street` under the
         // aliased association, not flatten `address`/`street` into sibling columns.
-        const result = parseCqlColumns(
-            'SELECT FROM Authors { name, address as residence { street } }',
-        );
+        const result = parseCqlColumns('SELECT FROM Authors { name, address as residence { street } }');
         assert.deepEqual(result, [
             { field: 'name', alias: 'name' },
             {
@@ -5352,9 +4094,7 @@ describe('parseCqlColumns', () => {
     });
 
     it('parses deeply nested aliased expand blocks', () => {
-        const result = parseCqlColumns(
-            'SELECT FROM Authors { address as residence { town as city { name } } }',
-        );
+        const result = parseCqlColumns('SELECT FROM Authors { address as residence { town as city { name } } }');
         assert.deepEqual(result, [
             {
                 field: 'address',
@@ -5390,9 +4130,7 @@ describe('parseCqlColumns', () => {
 
     it('parses space-separated dot-expand (author .{ name })', () => {
         // dot (unknown) is filtered; 'author' is followed directly by '{' → expand block
-        const result = parseCqlColumns(
-            'SELECT FROM Books { ID, author .{ name } }',
-        );
+        const result = parseCqlColumns('SELECT FROM Books { ID, author .{ name } }');
         assert.deepEqual(result, [
             { field: 'ID', alias: 'ID' },
             {
@@ -5404,9 +4142,7 @@ describe('parseCqlColumns', () => {
     });
 
     it('parses AS alias inside brace block', () => {
-        const result = parseCqlColumns(
-            'SELECT FROM Books { ID AS myId, title AS t }',
-        );
+        const result = parseCqlColumns('SELECT FROM Books { ID AS myId, title AS t }');
         assert.deepEqual(result, [
             { field: 'ID', alias: 'myId' },
             { field: 'title', alias: 't' },
@@ -5463,64 +4199,31 @@ describe('validateCqlQuery — expand blocks', () => {
     }
 
     it('accepts valid postfix projection', () => {
-        assert.deepEqual(
-            validateCqlQuery(
-                'SELECT FROM Books { ID, title }',
-                expandDefs(),
-                'Svc',
-            ),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT FROM Books { ID, title }', expandDefs(), 'Svc'), []);
     });
 
     it('reports unknown field in postfix projection', () => {
-        const errs = validateCqlQuery(
-            'SELECT FROM Books { ghost }',
-            expandDefs(),
-            'Svc',
-        );
+        const errs = validateCqlQuery('SELECT FROM Books { ghost }', expandDefs(), 'Svc');
         assert.equal(errs.length, 1);
         assert.ok(errs[0].message.includes('ghost'));
     });
 
     it('accepts valid expand block', () => {
-        assert.deepEqual(
-            validateCqlQuery(
-                'SELECT FROM Books { ID, author { name } }',
-                expandDefs(),
-                'Svc',
-            ),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT FROM Books { ID, author { name } }', expandDefs(), 'Svc'), []);
     });
 
     it('reports unknown field inside expand block', () => {
-        const errs = validateCqlQuery(
-            'SELECT FROM Books { ID, author { ghost } }',
-            expandDefs(),
-            'Svc',
-        );
+        const errs = validateCqlQuery('SELECT FROM Books { ID, author { ghost } }', expandDefs(), 'Svc');
         assert.equal(errs.length, 1);
         assert.ok(errs[0].message.includes('ghost'));
     });
 
     it('accepts valid nested expand', () => {
-        assert.deepEqual(
-            validateCqlQuery(
-                'SELECT FROM Books { ID, author { name, address { street } } }',
-                expandDefs(),
-                'Svc',
-            ),
-            [],
-        );
+        assert.deepEqual(validateCqlQuery('SELECT FROM Books { ID, author { name, address { street } } }', expandDefs(), 'Svc'), []);
     });
 
     it('reports unknown field in nested expand', () => {
-        const errs = validateCqlQuery(
-            'SELECT FROM Books { ID, author { name, address { ghost } } }',
-            expandDefs(),
-            'Svc',
-        );
+        const errs = validateCqlQuery('SELECT FROM Books { ID, author { name, address { ghost } } }', expandDefs(), 'Svc');
         assert.equal(errs.length, 1);
         assert.ok(errs[0].message.includes('ghost'));
     });
@@ -5528,11 +4231,7 @@ describe('validateCqlQuery — expand blocks', () => {
     it('tolerates missing lastIdentifier when opening nested expand brace', () => {
         // A '{' at braceDepth>0 with no preceding identifier (e.g. after a comma) —
         // expandArtifactStack.push(null) path. Should not throw.
-        const errs = validateCqlQuery(
-            'SELECT FROM Books { ID, { name } }',
-            expandDefs(),
-            'Svc',
-        );
+        const errs = validateCqlQuery('SELECT FROM Books { ID, { name } }', expandDefs(), 'Svc');
         // Validation completes without throwing; result may contain errors for the anonymous block
         assert.ok(Array.isArray(errs));
     });
@@ -5578,54 +4277,27 @@ describe('getSuggestions — expand cursor', () => {
         const q = 'SELECT FROM Books { ';
         const items = getSuggestions(q, q.length, expandDefs(), 'Svc');
         const labels = items.map((i) => i.label);
-        assert.ok(
-            labels.includes('ID'),
-            `expected ID in [${labels.join(',')}]`,
-        );
-        assert.ok(
-            labels.includes('title'),
-            `expected title in [${labels.join(',')}]`,
-        );
-        assert.ok(
-            labels.includes('author'),
-            `expected author in [${labels.join(',')}]`,
-        );
+        assert.ok(labels.includes('ID'), `expected ID in [${labels.join(',')}]`);
+        assert.ok(labels.includes('title'), `expected title in [${labels.join(',')}]`);
+        assert.ok(labels.includes('author'), `expected author in [${labels.join(',')}]`);
     });
 
     it('suggests target entity fields inside expand block', () => {
         const q = 'SELECT FROM Books { author { ';
         const items = getSuggestions(q, q.length, expandDefs(), 'Svc');
         const labels = items.map((i) => i.label);
-        assert.ok(
-            labels.includes('name'),
-            `expected name in [${labels.join(',')}]`,
-        );
-        assert.ok(
-            labels.includes('address'),
-            `expected address in [${labels.join(',')}]`,
-        );
-        assert.ok(
-            !labels.includes('title'),
-            'did not expect Books.title in expand scope',
-        );
+        assert.ok(labels.includes('name'), `expected name in [${labels.join(',')}]`);
+        assert.ok(labels.includes('address'), `expected address in [${labels.join(',')}]`);
+        assert.ok(!labels.includes('title'), 'did not expect Books.title in expand scope');
     });
 
     it('suggests nested target fields in double-nested expand', () => {
         const q = 'SELECT FROM Books { author { address { ';
         const items = getSuggestions(q, q.length, expandDefs(), 'Svc');
         const labels = items.map((i) => i.label);
-        assert.ok(
-            labels.includes('street'),
-            `expected street in [${labels.join(',')}]`,
-        );
-        assert.ok(
-            labels.includes('city'),
-            `expected city in [${labels.join(',')}]`,
-        );
-        assert.ok(
-            !labels.includes('ID'),
-            'did not expect Books.ID in deep expand',
-        );
+        assert.ok(labels.includes('street'), `expected street in [${labels.join(',')}]`);
+        assert.ok(labels.includes('city'), `expected city in [${labels.join(',')}]`);
+        assert.ok(!labels.includes('ID'), 'did not expect Books.ID in deep expand');
     });
 
     it('suggests target entity fields inside an aliased expand block', () => {
@@ -5634,36 +4306,18 @@ describe('getSuggestions — expand cursor', () => {
         const q = 'SELECT FROM Books { author as writer { ';
         const items = getSuggestions(q, q.length, expandDefs(), 'Svc');
         const labels = items.map((i) => i.label);
-        assert.ok(
-            labels.includes('name'),
-            `expected name in [${labels.join(',')}]`,
-        );
-        assert.ok(
-            labels.includes('address'),
-            `expected address in [${labels.join(',')}]`,
-        );
-        assert.ok(
-            !labels.includes('title'),
-            'did not expect Books.title in aliased expand scope',
-        );
+        assert.ok(labels.includes('name'), `expected name in [${labels.join(',')}]`);
+        assert.ok(labels.includes('address'), `expected address in [${labels.join(',')}]`);
+        assert.ok(!labels.includes('title'), 'did not expect Books.title in aliased expand scope');
     });
 
     it('suggests nested target fields through aliased expands', () => {
         const q = 'SELECT FROM Books { author as writer { address as home { ';
         const items = getSuggestions(q, q.length, expandDefs(), 'Svc');
         const labels = items.map((i) => i.label);
-        assert.ok(
-            labels.includes('street'),
-            `expected street in [${labels.join(',')}]`,
-        );
-        assert.ok(
-            labels.includes('city'),
-            `expected city in [${labels.join(',')}]`,
-        );
-        assert.ok(
-            !labels.includes('ID'),
-            'did not expect Books.ID in deep aliased expand',
-        );
+        assert.ok(labels.includes('street'), `expected street in [${labels.join(',')}]`);
+        assert.ok(labels.includes('city'), `expected city in [${labels.join(',')}]`);
+        assert.ok(!labels.includes('ID'), 'did not expect Books.ID in deep aliased expand');
     });
 
     it('retries clause detection when cursor is mid-identifier and initial clause is unknown', () => {

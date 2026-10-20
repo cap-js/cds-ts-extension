@@ -11,26 +11,11 @@
 
 /** @typedef {import('./CqlLogic').CompletionEntry} CompletionEntry */
 /** @typedef {import('./CqlLogic').ExpandColumn} ExpandColumn */
-const {
-    cdsTypeToTs,
-    extractSourceRelations,
-    parseCqlColumns,
-    tokenizeCql,
-} = require('./CqlLogic');
+const { cdsTypeToTs, extractSourceRelations, parseCqlColumns, tokenizeCql } = require('./CqlLogic');
 const { serviceAnnotationFor } = require('./ServiceAnnotation');
 /** @typedef {import('./QueryContext').RunWorker} RunWorker */
 /** @typedef {import('./QueryContext').RunBatchWorker} RunBatchWorker */
-const {
-    findAncestor,
-    isCdsQlInit,
-    isCdsQueryTag,
-    isDestructurableVarDecl,
-    isMemberAccess,
-    isMemberOrCallAccess,
-    isNamedVarDecl,
-    isScopeBoundary,
-    unwrapAwait,
-} = require('./TsAstHelpers');
+const { findAncestor, isCdsQlInit, isCdsQueryTag, isDestructurableVarDecl, isMemberAccess, isMemberOrCallAccess, isNamedVarDecl, isScopeBoundary, unwrapAwait } = require('./TsAstHelpers');
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,16 +38,8 @@ const {
  * @param {import('typescript').TaggedTemplateExpression} node
  * @returns {string}
  */
-const extractTemplateText = (
-    ts,
-    { template },
-) =>
-    ts.isNoSubstitutionTemplateLiteral(template)
-        ? template.text
-        : template.templateSpans.reduce(
-              (text, span) => text + ' ' + span.literal.text,
-              template.head.text,
-          );
+const extractTemplateText = (ts, { template }) =>
+    ts.isNoSubstitutionTemplateLiteral(template) ? template.text : template.templateSpans.reduce((text, span) => text + ' ' + span.literal.text, template.head.text);
 
 /** Returns the offset of `position` within the template literal content.
  * @param {TS} ts
@@ -70,11 +47,7 @@ const extractTemplateText = (
  * @param {number} position
  * @returns {number}
  */
-const offsetInTemplate = (
-    ts,
-    node,
-    position,
-) =>
+const offsetInTemplate = (ts, node, position) =>
     // +1 to skip the opening backtick
     position - (node.template.pos + 1);
 
@@ -88,19 +61,10 @@ const offsetInTemplate = (
  * @param {number} position
  * @returns {import('typescript').TaggedTemplateExpression | null}
  */
-function findCdsQueryTemplate(
-    ts,
-    sourceFile,
-    position,
-) {
+function findCdsQueryTemplate(ts, sourceFile, position) {
     /** @type {(node: import('typescript').Node) => import('typescript').TaggedTemplateExpression | null} */
     const visit = (node) =>
-        ts.isTaggedTemplateExpression(node) &&
-        isCdsQueryTag(ts, node.tag) &&
-        node.template.pos <= position &&
-        position <= node.template.end
-            ? node
-            : (ts.forEachChild(node, visit) ?? null);
+        ts.isTaggedTemplateExpression(node) && isCdsQueryTag(ts, node.tag) && node.template.pos <= position && position <= node.template.end ? node : (ts.forEachChild(node, visit) ?? null);
     return visit(sourceFile);
 }
 
@@ -110,19 +74,12 @@ function findCdsQueryTemplate(
  * @param {number} position
  * @returns {CqlTemplateRef | null}
  */
-function resolveToCdsQuery(
-    ts,
-    sourceFile,
-    position,
-) {
+function resolveToCdsQuery(ts, sourceFile, position) {
     const direct = findCdsQueryTemplate(ts, sourceFile, position);
     if (direct) return { template: direct, awaited: false };
 
     /** @type {(n: import('typescript').Node) => import('typescript').Node | null} */
-    const findNode = (n) =>
-        n.pos <= position && position <= n.end
-            ? (ts.forEachChild(n, findNode) ?? n)
-            : null;
+    const findNode = (n) => (n.pos <= position && position <= n.end ? (ts.forEachChild(n, findNode) ?? n) : null);
     const node = findNode(sourceFile);
     if (!node) return null;
 
@@ -156,14 +113,8 @@ function resolveToCdsQuery(
  * @param {import('typescript').SourceFile} sourceFile
  * @returns {CqlTemplateRef | null}
  */
-function findOriginatingTemplateInScope(
-    ts,
-    ident,
-    sourceFile,
-) {
-    const scope =
-        findAncestor(ident, /** @type {(n: import('typescript').Node) => n is import('typescript').Node} */ ((n) => isScopeBoundary(ts, n))) ??
-        sourceFile;
+function findOriginatingTemplateInScope(ts, ident, sourceFile) {
+    const scope = findAncestor(ident, /** @type {(n: import('typescript').Node) => n is import('typescript').Node} */ ((n) => isScopeBoundary(ts, n))) ?? sourceFile;
 
     const name = ident.text;
     /** @type {CqlTemplateRef | null} */
@@ -186,19 +137,14 @@ function findOriginatingTemplateInScope(
  * @param {import('typescript').SourceFile} sourceFile
  * @returns {CqlAssignment[]}
  */
-function collectCqlAssignments(
-    ts,
-    sourceFile,
-) {
+function collectCqlAssignments(ts, sourceFile) {
     /** @type {CqlAssignment[]} */
     const results = [];
     function visit(/** @type {import('typescript').Node} */ node) {
         if (isDestructurableVarDecl(ts, node)) {
             const { expr: init, awaited } = unwrapAwait(ts, node.initializer);
             if (isCdsQlInit(ts, init)) {
-                const varName = ts.isIdentifier(node.name)
-                    ? node.name.text
-                    : '[destructured]';
+                const varName = ts.isIdentifier(node.name) ? node.name.text : '[destructured]';
                 results.push({ varName, template: init, awaited });
             }
         }
@@ -218,9 +164,7 @@ function collectCqlAssignments(
  */
 function buildTypeString(columns) {
     const fields = columns.filter((c) => c.kind === 'field');
-    return fields.length === 0
-        ? 'unknown'
-        : `{ ${fields.map((c) => `${c.label}: ${cdsTypeToTs(c.detail)}`).join('; ')} }[]`;
+    return fields.length === 0 ? 'unknown' : `{ ${fields.map((c) => `${c.label}: ${cdsTypeToTs(c.detail)}`).join('; ')} }[]`;
 }
 
 /**
@@ -231,18 +175,9 @@ function buildTypeString(columns) {
  * @param {number} offset
  * @returns {{ name: string; start: number; end: number } | null}
  */
-function fieldTokenAtOffset(
-    queryText,
-    offset,
-) {
+function fieldTokenAtOffset(queryText, offset) {
     const isIdChar = (/** @type {string} */ c) => /[a-zA-Z0-9_$]/.test(c);
-    if (
-        !(
-            isIdChar(queryText[offset] ?? '') ||
-            isIdChar(queryText[offset - 1] ?? '')
-        )
-    )
-        return null;
+    if (!(isIdChar(queryText[offset] ?? '') || isIdChar(queryText[offset - 1] ?? ''))) return null;
     let s = offset;
     while (s > 0 && isIdChar(/** @type {string} */ (queryText[s - 1]))) s--;
     let e = offset;
@@ -271,12 +206,7 @@ function fieldTokenAtOffset(
  * @param {number} end
  * @returns {string}
  */
-function padWithNewlines(
-    cast,
-    sourceText,
-    start,
-    end,
-) {
+function padWithNewlines(cast, sourceText, start, end) {
     const budget = end - start;
     if (budget === cast.length) return cast;
 
@@ -313,22 +243,12 @@ function padWithNewlines(
  * @param {Record<string, CompletionEntry[]>} batchFields
  * @returns {string}
  */
-function buildTypeBody(
-    cols,
-    fieldMap,
-    batchFields,
-) {
+function buildTypeBody(cols, fieldMap, batchFields) {
     const entries = [];
     if (cols === null) {
         // SELECT * — emit all scalar fields
         for (const [label, entry] of fieldMap) {
-            if (
-                !(
-                    entry.detail.startsWith('cds.Association') ||
-                    entry.detail.startsWith('cds.Composition')
-                )
-            )
-                entries.push(`${label}:${cdsTypeToTs(entry.detail)}`);
+            if (!(entry.detail.startsWith('cds.Association') || entry.detail.startsWith('cds.Composition'))) entries.push(`${label}:${cdsTypeToTs(entry.detail)}`);
         }
     } else {
         for (const col of cols) {
@@ -337,38 +257,20 @@ function buildTypeBody(
                 const assocEntry = fieldMap.get(col.field);
                 const target = assocEntry?.target;
                 const subFields = target ? batchFields[target] : undefined;
-                const subMap = new Map(
-                    (subFields ?? []).map((f) => [f.label, f]),
-                );
-                const subBody = buildTypeBody(
-                    col.expand.length === 0 ? null : col.expand,
-                    subMap,
-                    batchFields,
-                );
-                entries.push(
-                    `${col.alias}:{${subBody}}${assocEntry?.toMany ? '[]' : ''}`,
-                );
+                const subMap = new Map((subFields ?? []).map((f) => [f.label, f]));
+                const subBody = buildTypeBody(col.expand.length === 0 ? null : col.expand, subMap, batchFields);
+                entries.push(`${col.alias}:{${subBody}}${assocEntry?.toMany ? '[]' : ''}`);
             } else {
                 const entry = fieldMap.get(col.field);
                 if (entry) {
                     // Association without explicit expand: produce implicit SELECT * expand
                     if (entry.target) {
                         const subFields = batchFields[entry.target];
-                        const subMap = new Map(
-                            (subFields ?? []).map((f) => [f.label, f]),
-                        );
-                        const subBody = buildTypeBody(
-                            null,
-                            subMap,
-                            batchFields,
-                        );
-                        entries.push(
-                            `${col.alias}:{${subBody}}${entry.toMany ? '[]' : ''}`,
-                        );
+                        const subMap = new Map((subFields ?? []).map((f) => [f.label, f]));
+                        const subBody = buildTypeBody(null, subMap, batchFields);
+                        entries.push(`${col.alias}:{${subBody}}${entry.toMany ? '[]' : ''}`);
                     } else {
-                        entries.push(
-                            `${col.alias}:${cdsTypeToTs(entry.detail)}`,
-                        );
+                        entries.push(`${col.alias}:${cdsTypeToTs(entry.detail)}`);
                     }
                 }
             }
@@ -393,18 +295,9 @@ function buildTypeBody(
  * @param {import('typescript/lib/tsserverlibrary').server.Logger} logger
  * @returns {string | null}
  */
-function resolveRowTypeBody(
-    ts,
-    queryText,
-    effectivePrefix,
-    projectRoot,
-    runBatchWorker,
-    logger,
-) {
+function resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatchWorker, logger) {
     // Collect all FROM/JOIN sources, probe each for fields, merge results
-    const significant = tokenizeCql(queryText).filter(
-        (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-    );
+    const significant = tokenizeCql(queryText).filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
     const sources = extractSourceRelations(significant);
     if (!sources.length) return null;
 
@@ -431,9 +324,7 @@ function resolveRowTypeBody(
     // Collect expand-target entity FQNs by BFS through the expand tree.
     const batchFields = /** @type {Record<string, import('./CqlLogic').CompletionEntry[]>} */ ({});
     if (parsedCols !== null) {
-        for (const [entity, fields] of Object.entries(
-            batchResult?.fields ?? {},
-        )) {
+        for (const [entity, fields] of Object.entries(batchResult?.fields ?? {})) {
             if (fields) batchFields[entity] = fields;
         }
 
@@ -466,9 +357,7 @@ function resolveRowTypeBody(
                     if (col.expand !== undefined && col.expand.length > 0) {
                         const t = map.get(col.field)?.target;
                         const subFields = t ? (batchFields[t] ?? []) : [];
-                        const subMap = new Map(
-                            subFields.map((f) => [f.label, f]),
-                        );
+                        const subMap = new Map(subFields.map((f) => [f.label, f]));
                         next.push({ cols: col.expand, map: subMap });
                     }
                 }
@@ -495,23 +384,8 @@ function resolveRowTypeBody(
  * @param {import('typescript/lib/tsserverlibrary').server.Logger} logger
  * @returns {string | null}
  */
-function resolveTypeExpr(
-    ts,
-    queryText,
-    effectivePrefix,
-    awaited,
-    projectRoot,
-    runBatchWorker,
-    logger,
-) {
-    const typeBody = resolveRowTypeBody(
-        ts,
-        queryText,
-        effectivePrefix,
-        projectRoot,
-        runBatchWorker,
-        logger,
-    );
+function resolveTypeExpr(ts, queryText, effectivePrefix, awaited, projectRoot, runBatchWorker, logger) {
+    const typeBody = resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatchWorker, logger);
     if (typeBody === null) return null;
 
     const innerType = `{${typeBody}}[]`;
@@ -535,19 +409,7 @@ function resolveTypeExpr(
  * @param {import('typescript/lib/tsserverlibrary').server.Logger} logger
  * @returns {void}
  */
-function placeCast(
-    ts,
-    sf,
-    fileName,
-    sourceText,
-    template,
-    varName,
-    typeExpr,
-    replacements,
-    tailAliases,
-    rewrittenRanges,
-    logger,
-) {
+function placeCast(ts, sf, fileName, sourceText, template, varName, typeExpr, replacements, tailAliases, rewrittenRanges, logger) {
     // Walk up from the template node to its VariableDeclaration
     const decl = findAncestor(template, ts.isVariableDeclaration);
     if (!decl) return;
@@ -571,27 +433,13 @@ function placeCast(
         const cast = `\`\` as unknown as ${aliasName}`;
 
         if (cast.length <= budget) {
-            const text = padWithNewlines(
-                cast,
-                sourceText,
-                replaceStart,
-                replaceEnd,
-            );
+            const text = padWithNewlines(cast, sourceText, replaceStart, replaceEnd);
             replacements.push({ start: replaceStart, end: replaceEnd, text });
-            rewrittenRanges
-                ?.get(fileName)
-                ?.push({ start: replaceStart, end: replaceEnd }) ??
-                rewrittenRanges?.set(fileName, [
-                    { start: replaceStart, end: replaceEnd },
-                ]);
+            rewrittenRanges?.get(fileName)?.push({ start: replaceStart, end: replaceEnd }) ?? rewrittenRanges?.set(fileName, [{ start: replaceStart, end: replaceEnd }]);
             tailAliases.push(`type ${aliasName}=${typeExpr};`);
-            logger.info(
-                `[cds-plugin] rewrite ${varName}: alias=${aliasName} budget=${budget} cast-len=${cast.length} type=${typeExpr.slice(0, 60)}`,
-            );
+            logger.info(`[cds-plugin] rewrite ${varName}: alias=${aliasName} budget=${budget} cast-len=${cast.length} type=${typeExpr.slice(0, 60)}`);
         } else {
-            logger.info(
-                `[cds-plugin] type for ${varName} too long even for alias (budget=${budget}), skipping`,
-            );
+            logger.info(`[cds-plugin] type for ${varName} too long even for alias (budget=${budget}), skipping`);
         }
     } else {
         // JS strategy: JSDoc @type cast on the initializer span (name.end → initEnd).
@@ -610,27 +458,13 @@ function placeCast(
         const jsCast = ` = (/**@type{${aliasName}}*/({}))`;
 
         if (jsCast.length <= budget) {
-            const text = padWithNewlines(
-                jsCast,
-                sourceText,
-                replaceStart,
-                replaceEnd,
-            );
+            const text = padWithNewlines(jsCast, sourceText, replaceStart, replaceEnd);
             replacements.push({ start: replaceStart, end: replaceEnd, text });
-            rewrittenRanges
-                ?.get(fileName)
-                ?.push({ start: replaceStart, end: replaceEnd }) ??
-                rewrittenRanges?.set(fileName, [
-                    { start: replaceStart, end: replaceEnd },
-                ]);
+            rewrittenRanges?.get(fileName)?.push({ start: replaceStart, end: replaceEnd }) ?? rewrittenRanges?.set(fileName, [{ start: replaceStart, end: replaceEnd }]);
             tailAliases.push(`/**@typedef {${typeExpr}} ${aliasName}*/`);
-            logger.info(
-                `[cds-plugin] rewrite ${varName}: alias=${aliasName} js-budget=${budget} type=${typeExpr.slice(0, 60)}`,
-            );
+            logger.info(`[cds-plugin] rewrite ${varName}: alias=${aliasName} js-budget=${budget} type=${typeExpr.slice(0, 60)}`);
         } else {
-            logger.info(
-                `[cds-plugin] type for ${varName} too long even for alias (budget=${budget}), skipping`,
-            );
+            logger.info(`[cds-plugin] type for ${varName} too long even for alias (budget=${budget}), skipping`);
         }
     }
 }
@@ -656,20 +490,7 @@ function placeCast(
  * @param {{ typeExprCache?: Map<string, string>; cacheOnly?: boolean } | undefined} opts
  * @returns {string}
  */
-function rewriteSnapshot(
-    fileName,
-    sourceText,
-    ts,
-    originalSource,
-    rewriteCache,
-    _runWorker,
-    runBatchWorker,
-    logger,
-    projectRoot,
-    prefix,
-    rewrittenRanges,
-    opts,
-) {
+function rewriteSnapshot(fileName, sourceText, ts, originalSource, rewriteCache, _runWorker, runBatchWorker, logger, projectRoot, prefix, rewrittenRanges, opts) {
     const typeExprCache = opts?.typeExprCache;
     const cacheOnly = opts?.cacheOnly ?? false;
     const cached = rewriteCache.get(fileName);
@@ -681,20 +502,10 @@ function rewriteSnapshot(
     // Always record original so completions/hover can find templates
     originalSource.set(fileName, sourceText);
 
-    const scriptKind = /\.tsx?$/.test(fileName)
-        ? ts.ScriptKind.TS
-        : ts.ScriptKind.JS;
-    const sf = ts.createSourceFile(
-        fileName,
-        sourceText,
-        ts.ScriptTarget.Latest,
-        true,
-        scriptKind,
-    );
+    const scriptKind = /\.tsx?$/.test(fileName) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+    const sf = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true, scriptKind);
     const assignments = collectCqlAssignments(ts, sf);
-    logger.info(
-        `[cds-plugin] rewrite: ${assignments.length} assignments in ${fileName.split('/').pop()}`,
-    );
+    logger.info(`[cds-plugin] rewrite: ${assignments.length} assignments in ${fileName.split('/').pop()}`);
 
     if (assignments.length === 0) {
         rewriteCache.set(fileName, { sourceText, rewritten: sourceText });
@@ -708,8 +519,7 @@ function rewriteSnapshot(
     let workerMiss = false; // true if any assignment was skipped because the worker returned no fields
 
     for (const { varName, template, awaited } of assignments) {
-        const effectivePrefix =
-            serviceAnnotationFor(ts, sourceText, template, sf) ?? prefix;
+        const effectivePrefix = serviceAnnotationFor(ts, sourceText, template, sf) ?? prefix;
         const queryText = extractTemplateText(ts, template);
 
         // Type resolution is keyed purely by (queryText, prefix, awaited). If we've
@@ -728,15 +538,7 @@ function rewriteSnapshot(
             workerMiss = true;
             continue;
         } else {
-            const resolved = resolveTypeExpr(
-                ts,
-                queryText,
-                effectivePrefix,
-                awaited,
-                projectRoot,
-                runBatchWorker,
-                logger,
-            );
+            const resolved = resolveTypeExpr(ts, queryText, effectivePrefix, awaited, projectRoot, runBatchWorker, logger);
             if (resolved === null) {
                 workerMiss = true;
                 continue;
@@ -745,31 +547,17 @@ function rewriteSnapshot(
             typeExprCache?.set(cacheKey, typeExpr);
         }
 
-        placeCast(
-            ts,
-            sf,
-            fileName,
-            sourceText,
-            template,
-            varName,
-            typeExpr,
-            replacements,
-            tailAliases,
-            rewrittenRanges,
-            logger,
-        );
+        placeCast(ts, sf, fileName, sourceText, template, varName, typeExpr, replacements, tailAliases, rewrittenRanges, logger);
     }
 
     if (replacements.length === 0) {
-        if (!workerMiss)
-            rewriteCache.set(fileName, { sourceText, rewritten: sourceText });
+        if (!workerMiss) rewriteCache.set(fileName, { sourceText, rewritten: sourceText });
         return sourceText;
     }
 
     replacements.sort((a, b) => b.start - a.start);
     let rewritten = sourceText;
-    for (const { start, end, text } of replacements)
-        rewritten = rewritten.slice(0, start) + text + rewritten.slice(end);
+    for (const { start, end, text } of replacements) rewritten = rewritten.slice(0, start) + text + rewritten.slice(end);
 
     // Append type aliases for declarations whose full type didn't fit inline.
     // These go on new lines at the very end — they don't affect byte offsets of
@@ -786,9 +574,7 @@ function rewriteSnapshot(
     if (!workerMiss) {
         rewriteCache.set(fileName, { sourceText, rewritten });
     }
-    logger.info(
-        `[cds-plugin] rewrote ${fileName.split('/').pop()}, ${replacements.length} vars, ${tailAliases.length} tail aliases${workerMiss ? ' (partial — not cached)' : ''}`,
-    );
+    logger.info(`[cds-plugin] rewrote ${fileName.split('/').pop()}, ${replacements.length} vars, ${tailAliases.length} tail aliases${workerMiss ? ' (partial — not cached)' : ''}`);
     return rewritten;
 }
 

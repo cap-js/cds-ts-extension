@@ -15,10 +15,7 @@ const { serviceAnnotationFor } = require('./ServiceAnnotation');
  * @param {TS} typescript
  * @returns {import('typescript').Diagnostic[]}
  */
-function getCqlDiagnostics(
-    ctx,
-    typescript,
-) {
+function getCqlDiagnostics(ctx, typescript) {
     const { origText, origSf, projectRoot, runWorker, logger } = ctx;
 
     const assignments = collectCqlAssignments(typescript, origSf);
@@ -28,16 +25,8 @@ function getCqlDiagnostics(
 
     for (const { template } of assignments) {
         const queryText = extractTemplateText(typescript, template);
-        const prefix = serviceAnnotationFor(
-            typescript,
-            origText,
-            template,
-            origSf,
-        );
-        const result = runWorker(
-            [projectRoot, queryText, '-1', prefix ?? ''],
-            logger,
-        );
+        const prefix = serviceAnnotationFor(typescript, origText, template, origSf);
+        const result = runWorker([projectRoot, queryText, '-1', prefix ?? ''], logger);
 
         // +1 skips the opening backtick
         const templateContentStart = template.template.getStart(origSf) + 1;
@@ -47,9 +36,7 @@ function getCqlDiagnostics(
             // or an unresolvable `using ... from '@capire/...'` content dependency). Rather
             // than silently offering nothing, mark the query with the compile error so the
             // user knows to install the missing dependency / fix the model.
-            logger.info(
-                `[cds-plugin] model unavailable for diagnostics: ${result.error}`,
-            );
+            logger.info(`[cds-plugin] model unavailable for diagnostics: ${result.error}`);
             diagnostics.push({
                 file: origSf,
                 start: templateContentStart,

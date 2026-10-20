@@ -85,8 +85,7 @@ function candidateGlobalRoots() {
     if (process.env['CDS_LSP_NO_GLOBAL_FALLBACK']) return [];
     const roots = [];
     const nodePath = process.env['NODE_PATH'];
-    if (nodePath)
-        for (const p of nodePath.split(delimiter)) if (p) roots.push(p);
+    if (nodePath) for (const p of nodePath.split(delimiter)) if (p) roots.push(p);
     roots.push(join(dirname(process.execPath), '..', 'lib', 'node_modules'));
     roots.push('/usr/local/lib/node_modules');
     roots.push('/opt/homebrew/lib/node_modules');
@@ -104,12 +103,7 @@ function candidateGlobalRoots() {
  */
 function probeEntityFields(entity, prefix, defs) {
     const probeQuery = `SELECT  FROM ${entity} WHERE `;
-    const explicit = getSuggestions(
-        probeQuery,
-        probeQuery.length,
-        defs,
-        prefix || undefined,
-    );
+    const explicit = getSuggestions(probeQuery, probeQuery.length, defs, prefix || undefined);
     const fields = explicit.filter((c) => c.kind === 'field');
     if (fields.length > 0 || prefix || entity.includes('.')) return fields;
 
@@ -118,12 +112,7 @@ function probeEntityFields(entity, prefix, defs) {
     for (const key of Object.keys(defs)) {
         if (key.endsWith(suffix)) {
             const svc = key.slice(0, key.length - suffix.length);
-            const candidates = getSuggestions(
-                probeQuery,
-                probeQuery.length,
-                defs,
-                svc,
-            ).filter((c) => c.kind === 'field');
+            const candidates = getSuggestions(probeQuery, probeQuery.length, defs, svc).filter((c) => c.kind === 'field');
             if (candidates.length > 0) return candidates;
         }
     }
@@ -135,9 +124,7 @@ function probeEntityFields(entity, prefix, defs) {
  * @returns {Promise<{ cds: any; defs: CsnDefs } | { error: string }>}
  */
 async function loadModel(projectRoot) {
-    const globalRoots =
-        _testOverrides.globalRoots?.() ??
-        (cachedGlobalRoots ??= candidateGlobalRoots());
+    const globalRoots = _testOverrides.globalRoots?.() ?? (cachedGlobalRoots ??= candidateGlobalRoots());
     // Local first (a project-local @sap/cds must win), then each global root.
     // require.resolve with an explicit `paths` avoids any dependency on cwd,
     // NODE_PATH, or a shell. Loop one root at a time so we know which one hit
@@ -179,13 +166,7 @@ async function loadModel(projectRoot) {
  * @param {(result: WorkerResult) => void} write
  * @returns {Promise<void>}
  */
-async function runWorkerMain(
-    projectRoot,
-    cqlQuery,
-    cursorOffsetStr,
-    servicePrefix,
-    write,
-) {
+async function runWorkerMain(projectRoot, cqlQuery, cursorOffsetStr, servicePrefix, write) {
     if (!(projectRoot && cqlQuery && cursorOffsetStr)) {
         write({ error: 'missing arguments' });
         return;
@@ -205,12 +186,7 @@ async function runWorkerMain(
         const diagnostics = validateCqlQuery(cqlQuery, defs, prefix);
         write({ diagnostics });
     } else {
-        const completions = getSuggestions(
-            cqlQuery,
-            cursorOffset,
-            defs,
-            prefix,
-        );
+        const completions = getSuggestions(cqlQuery, cursorOffset, defs, prefix);
         write({ completions });
     }
 }
@@ -261,9 +237,7 @@ async function runMain(argv, stdin, stdout) {
         function writeBatch(/** @type {BatchWorkerResult} */ result) {
             stdout.write(JSON.stringify(result) + '\n');
         }
-        await runBatchWorkerMain(projectRoot, fourthArg, writeBatch).catch(
-            (e) => writeBatch({ fields: {}, error: String(e) }),
-        );
+        await runBatchWorkerMain(projectRoot, fourthArg, writeBatch).catch((e) => writeBatch({ fields: {}, error: String(e) }));
     } else if (modeOrQuery === '--persistent') {
         // Long-lived mode: model loaded once and cached; invalidated when .cds files change.
         // Protocol: newline-delimited JSON on stdin/stdout.
@@ -279,21 +253,14 @@ async function runMain(argv, stdin, stdout) {
         let watcher;
         try {
             const watchFn = _testOverrides.watch ?? watch;
-            watcher = watchFn(
-                /** @type {string} */ (projectRoot),
-                { recursive: true },
-                (/** @type {import('node:fs').WatchEventType} */ _event, /** @type {string | Buffer | null} */ filename) => {
-                    if (
-                        typeof filename === 'string' &&
-                        filename.endsWith('.cds')
-                    ) {
-                        if (invalidateTimer) clearTimeout(invalidateTimer);
-                        invalidateTimer = setTimeout(() => {
-                            cachedDefs = null;
-                        }, 200);
-                    }
-                },
-            );
+            watcher = watchFn(/** @type {string} */ (projectRoot), { recursive: true }, (/** @type {import('node:fs').WatchEventType} */ _event, /** @type {string | Buffer | null} */ filename) => {
+                if (typeof filename === 'string' && filename.endsWith('.cds')) {
+                    if (invalidateTimer) clearTimeout(invalidateTimer);
+                    invalidateTimer = setTimeout(() => {
+                        cachedDefs = null;
+                    }, 200);
+                }
+            });
             watcher.on('error', () => {
                 /* ignore — model stays cached until process restart */
             });
@@ -309,86 +276,75 @@ async function runMain(argv, stdin, stdout) {
         let closed = false;
         /** @type {(() => void) | undefined} */
         let resolveAll;
-        await /** @type {Promise<void>} */ (new Promise((resolve) => {
-            resolveAll = resolve;
-            rl.on('line', async (line) => {
-                inFlight++;
-                try {
-                    let req;
+        await /** @type {Promise<void>} */ (
+            new Promise((resolve) => {
+                resolveAll = resolve;
+                rl.on('line', async (line) => {
+                    inFlight++;
                     try {
-                        req = JSON.parse(line);
-                    } catch {
-                        return;
-                    }
-                    const root = req.projectRoot ?? projectRoot;
-                    if (!root) {
-                        stdout.write(
-                            JSON.stringify({
-                                id: req.id,
-                                result: { error: 'missing projectRoot' },
-                            }) + '\n',
-                        );
-                        return;
-                    }
-
-                    if (root !== cachedRoot || !cachedDefs) {
-                        const loaded = await loadModel(root);
-                        if ('error' in loaded) {
+                        let req;
+                        try {
+                            req = JSON.parse(line);
+                        } catch {
+                            return;
+                        }
+                        const root = req.projectRoot ?? projectRoot;
+                        if (!root) {
                             stdout.write(
                                 JSON.stringify({
                                     id: req.id,
-                                    result: { error: loaded.error },
+                                    result: { error: 'missing projectRoot' },
                                 }) + '\n',
                             );
                             return;
                         }
-                        cachedDefs = loaded.defs;
-                        cachedRoot = root;
-                    }
 
-                    let result;
-                    if (req.kind === 'batch') {
-                        const fields = /** @type {Record<string, import('./CqlLogic').CompletionEntry[]>} */ ({});
-                        for (const { entity, prefix } of req.probes ?? []) {
-                            fields[entity] = probeEntityFields(
-                                entity,
-                                prefix,
-                                cachedDefs,
-                            );
+                        if (root !== cachedRoot || !cachedDefs) {
+                            const loaded = await loadModel(root);
+                            if ('error' in loaded) {
+                                stdout.write(
+                                    JSON.stringify({
+                                        id: req.id,
+                                        result: { error: loaded.error },
+                                    }) + '\n',
+                                );
+                                return;
+                            }
+                            cachedDefs = loaded.defs;
+                            cachedRoot = root;
                         }
-                        result = { fields };
-                    } else {
-                        const [query, cursorStr, prefix] = req.args ?? [];
-                        const offset = Number.parseInt(cursorStr ?? '-1', 10);
-                        result =
-                            offset < 0
-                                ? {
-                                      diagnostics: validateCqlQuery(
-                                          query ?? '',
-                                          cachedDefs,
-                                          prefix || undefined,
-                                      ),
-                                  }
-                                : {
-                                      completions: getSuggestions(
-                                          query ?? '',
-                                          offset,
-                                          cachedDefs,
-                                          prefix || undefined,
-                                      ),
-                                  };
+
+                        let result;
+                        if (req.kind === 'batch') {
+                            const fields = /** @type {Record<string, import('./CqlLogic').CompletionEntry[]>} */ ({});
+                            for (const { entity, prefix } of req.probes ?? []) {
+                                fields[entity] = probeEntityFields(entity, prefix, cachedDefs);
+                            }
+                            result = { fields };
+                        } else {
+                            const [query, cursorStr, prefix] = req.args ?? [];
+                            const offset = Number.parseInt(cursorStr ?? '-1', 10);
+                            result =
+                                offset < 0
+                                    ? {
+                                          diagnostics: validateCqlQuery(query ?? '', cachedDefs, prefix || undefined),
+                                      }
+                                    : {
+                                          completions: getSuggestions(query ?? '', offset, cachedDefs, prefix || undefined),
+                                      };
+                        }
+                        stdout.write(JSON.stringify({ id: req.id, result }) + '\n');
+                    } finally {
+                        inFlight--;
+                        if (closed && inFlight === 0) resolveAll?.();
                     }
-                    stdout.write(JSON.stringify({ id: req.id, result }) + '\n');
-                } finally {
-                    inFlight--;
-                    if (closed && inFlight === 0) resolveAll?.();
-                }
-            });
-            rl.on('close', () => {
-                closed = true;
-                if (inFlight === 0) resolve();
-            });
-        }));
+                });
+                rl.on('close', () => {
+                    closed = true;
+                    if (inFlight === 0) resolve();
+                });
+            })
+        );
         // Clean up the fs.watch handle so it doesn't keep the event loop alive
         // (critical when runMain is called in-process from tests).
         if (invalidateTimer) clearTimeout(invalidateTimer);
@@ -398,22 +354,13 @@ async function runMain(argv, stdin, stdout) {
             /* ignore */
         }
     } else {
-        const write = (/** @type {WorkerResult} */ result) =>
-            stdout.write(JSON.stringify(result) + '\n');
-        await runWorkerMain(
-            projectRoot,
-            modeOrQuery,
-            fourthArg,
-            servicePrefix,
-            write,
-        ).catch((e) => write({ error: String(e) }));
+        const write = (/** @type {WorkerResult} */ result) => stdout.write(JSON.stringify(result) + '\n');
+        await runWorkerMain(projectRoot, modeOrQuery, fourthArg, servicePrefix, write).catch((e) => write({ error: String(e) }));
     }
 }
 
 module.exports = { _testOverrides, runWorkerMain, runBatchWorkerMain, runMain };
 
 if (require.main === module) {
-    runMain(process.argv, process.stdin, process.stdout).catch(() =>
-        process.exit(1),
-    );
+    runMain(process.argv, process.stdin, process.stdout).catch(() => process.exit(1));
 }

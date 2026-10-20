@@ -30,10 +30,7 @@ const { CqlDiagnosticCode } = require('../src/CqlLogic');
 // while exercising every proxy override.
 
 const { rewriteSnapshot } = require('../src/CqlTypeRewriter');
-const {
-    getCqlCompletions,
-    getCqlCompletionDetails,
-} = require('../src/CqlCompletions');
+const { getCqlCompletions, getCqlCompletionDetails } = require('../src/CqlCompletions');
 const { getCqlHover } = require('../src/CqlHover');
 const { getCqlDiagnostics } = require('../src/CqlDiagnostics');
 const { readConfig, resolveQueryContext } = require('../src/QueryContext');
@@ -96,19 +93,7 @@ function createProxy(
 
     originalSource.set(fileName, sourceText);
 
-    const rewritten = rewriteSnapshot(
-        fileName,
-        sourceText,
-        TS,
-        originalSource,
-        rewriteCache,
-        worker,
-        batchWorker,
-        NO_LOGGER,
-        '/proj',
-        undefined,
-        rewrittenRanges,
-    );
+    const rewritten = rewriteSnapshot(fileName, sourceText, TS, originalSource, rewriteCache, worker, batchWorker, NO_LOGGER, '/proj', undefined, rewrittenRanges);
 
     // Real TS LanguageService backed by the rewritten snapshot
     const lsHost = {
@@ -122,9 +107,7 @@ function createProxy(
         getScriptSnapshot: (f) => {
             if (f === fileName) return TS.ScriptSnapshot.fromString(rewritten);
             try {
-                return TS.ScriptSnapshot.fromString(
-                    require('node:fs').readFileSync(f, 'utf8'),
-                );
+                return TS.ScriptSnapshot.fromString(require('node:fs').readFileSync(f, 'utf8'));
             } catch {
                 return undefined;
             }
@@ -168,18 +151,13 @@ function createProxy(
     const cfg = readConfig(config);
 
     // filterSemanticClassifications (mirrors index.ts — drops tokens in rewritten ranges / beyond orig)
-    function filterSemanticClassifications(
-        base,
-        ranges,
-        origLength,
-    ) {
+    function filterSemanticClassifications(base, ranges, origLength) {
         if (!ranges?.length) return base;
         const out = [];
         for (let i = 0; i < base.spans.length; i += 3) {
             const tokStart = base.spans[i];
             if (tokStart >= origLength) continue;
-            if (!ranges.some((r) => tokStart >= r.start && tokStart < r.end))
-                out.push(tokStart, base.spans[i + 1], base.spans[i + 2]);
+            if (!ranges.some((r) => tokStart >= r.start && tokStart < r.end)) out.push(tokStart, base.spans[i + 1], base.spans[i + 2]);
         }
         return { spans: out, endOfLineState: base.endOfLineState };
     }
@@ -187,34 +165,18 @@ function createProxy(
     // lsOrig: LanguageService backed by the ORIGINAL source, used for syntactic classifications
     const lsOrigHost = {
         ...lsHost,
-        getScriptSnapshot: (f) =>
-            f === fileName
-                ? TS.ScriptSnapshot.fromString(sourceText)
-                : lsHost.getScriptSnapshot(f),
+        getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(sourceText) : lsHost.getScriptSnapshot(f)),
     };
-    const lsOrig = TS.createLanguageService(
-        lsOrigHost,
-        TS.createDocumentRegistry(),
-    );
+    const lsOrig = TS.createLanguageService(lsOrigHost, TS.createDocumentRegistry());
 
     function getCtx() {
-        return resolveQueryContext(
-            fileName,
-            fakeInfo,
-            TS,
-            originalSource,
-            worker,
-            batchWorker,
-            NO_LOGGER,
-            '/proj',
-        );
+        return resolveQueryContext(fileName, fakeInfo, TS, originalSource, worker, batchWorker, NO_LOGGER, '/proj');
     }
 
     const proxy = Object.create(null);
     for (const k of Object.keys(ls)) {
         const m = ls[k];
-        if (typeof m === 'function')
-            proxy[k] = (...args) => m.apply(ls, args);
+        if (typeof m === 'function') proxy[k] = (...args) => m.apply(ls, args);
     }
 
     proxy.getSemanticDiagnostics = (fn) => {
@@ -236,44 +198,18 @@ function createProxy(
         return { ...base, entries: [...cds.entries, ...base.entries] };
     };
 
-    proxy.getCompletionEntryDetails = (
-        fn,
-        position,
-        entryName,
-        fmtOpts,
-        source,
-        prefs,
-        data,
-    ) => {
-        const base = ls.getCompletionEntryDetails(
-            fn,
-            position,
-            entryName,
-            fmtOpts,
-            source,
-            prefs,
-            data,
-        );
+    proxy.getCompletionEntryDetails = (fn, position, entryName, fmtOpts, source, prefs, data) => {
+        const base = ls.getCompletionEntryDetails(fn, position, entryName, fmtOpts, source, prefs, data);
         if (!cfg['cds.ql.completion']) return base;
         if (!source?.startsWith('cds:')) return base;
         const ctx = getCtx();
         if (!ctx) return base;
-        const cds = getCqlCompletionDetails(
-            fn,
-            position,
-            entryName,
-            source,
-            ctx,
-            TS,
-        );
+        const cds = getCqlCompletionDetails(fn, position, entryName, source, ctx, TS);
         if (!cds) return base;
         return {
             ...base,
             ...cds,
-            codeActions: [
-                ...(base?.codeActions ?? []),
-                ...(cds.codeActions ?? []),
-            ],
+            codeActions: [...(base?.codeActions ?? []), ...(cds.codeActions ?? [])],
         };
     };
 
@@ -285,17 +221,10 @@ function createProxy(
         return getCqlHover(fn, position, ctx, TS) ?? base;
     };
 
-    proxy.getEncodedSyntacticClassifications = (fn, span) =>
-        rewrittenRanges.has(fn)
-            ? lsOrig.getEncodedSyntacticClassifications(fn, span)
-            : ls.getEncodedSyntacticClassifications(fn, span);
+    proxy.getEncodedSyntacticClassifications = (fn, span) => (rewrittenRanges.has(fn) ? lsOrig.getEncodedSyntacticClassifications(fn, span) : ls.getEncodedSyntacticClassifications(fn, span));
 
     proxy.getEncodedSemanticClassifications = (fn, span, fmt) =>
-        filterSemanticClassifications(
-            ls.getEncodedSemanticClassifications(fn, span, fmt),
-            rewrittenRanges.get(fn),
-            originalSource.get(fn)?.length ?? Number.POSITIVE_INFINITY,
-        );
+        filterSemanticClassifications(ls.getEncodedSemanticClassifications(fn, span, fmt), rewrittenRanges.get(fn), originalSource.get(fn)?.length ?? Number.POSITIVE_INFINITY);
 
     return { proxy, originalSource, rewrittenRanges, rewritten };
 }
@@ -334,31 +263,18 @@ const EMPTY_BATCH_WORKER = (_root, _probes, _logger) => ({
 
 describe('Plugin proxy — completions', () => {
     it('prepends CDS field completions inside template literal', () => {
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
         const pos = posOf(src, 'id');
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER);
-        const info = proxy.getCompletionsAtPosition(
-            'test.ts',
-            pos,
-            undefined,
-            undefined,
-        );
+        const info = proxy.getCompletionsAtPosition('test.ts', pos, undefined, undefined);
         assert.ok(info, 'expected completion info');
         const labels = info.entries.map((e) => e.name);
-        assert.ok(
-            labels.includes('id'),
-            'CDS field "id" must be in completions',
-        );
-        assert.ok(
-            labels.includes('title'),
-            'CDS field "title" must be in completions',
-        );
+        assert.ok(labels.includes('id'), 'CDS field "id" must be in completions');
+        assert.ok(labels.includes('title'), 'CDS field "title" must be in completions');
     });
 
     it('returns base completions unchanged when cursor is outside template', () => {
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
         const pos = posOf(src, 'export');
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER);
         // getCqlCompletions returns null here → proxy falls through to base
@@ -371,10 +287,7 @@ describe('Plugin proxy — completions', () => {
                 }),
                 getScriptFileNames: () => ['test.ts'],
                 getScriptVersion: () => '1',
-                getScriptSnapshot: (f) =>
-                    f === 'test.ts'
-                        ? TS.ScriptSnapshot.fromString(src)
-                        : undefined,
+                getScriptSnapshot: (f) => (f === 'test.ts' ? TS.ScriptSnapshot.fromString(src) : undefined),
                 getCurrentDirectory: () => '/proj',
                 getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
                 fileExists: (f) => f === 'test.ts',
@@ -383,111 +296,49 @@ describe('Plugin proxy — completions', () => {
             },
             TS.createDocumentRegistry(),
         );
-        const base = baseLs.getCompletionsAtPosition(
-            'test.ts',
-            pos,
-            undefined,
-            undefined,
-        );
+        const base = baseLs.getCompletionsAtPosition('test.ts', pos, undefined, undefined);
         const proxy_ = createProxy('test.ts', src, BOOKS_WORKER).proxy;
-        const result = proxy_.getCompletionsAtPosition(
-            'test.ts',
-            pos,
-            undefined,
-            undefined,
-        );
+        const result = proxy_.getCompletionsAtPosition('test.ts', pos, undefined, undefined);
         // Both should be present or both absent (proxy must not inject CDS entries here)
         const proxyLabels = result?.entries.map((e) => e.name) ?? [];
-        assert.ok(
-            !proxyLabels.includes('id'),
-            'CDS field must NOT appear outside template',
-        );
-        assert.ok(
-            !proxyLabels.includes('title'),
-            'CDS field must NOT appear outside template',
-        );
+        assert.ok(!proxyLabels.includes('id'), 'CDS field must NOT appear outside template');
+        assert.ok(!proxyLabels.includes('title'), 'CDS field must NOT appear outside template');
     });
 
     it('feature flag cds.ql.completion=false suppresses CDS completions', () => {
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
         const pos = posOf(src, 'id');
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER, {
             'cds.ql.completion': false,
         });
-        const info = proxy.getCompletionsAtPosition(
-            'test.ts',
-            pos,
-            undefined,
-            undefined,
-        );
+        const info = proxy.getCompletionsAtPosition('test.ts', pos, undefined, undefined);
         const labels = info?.entries.map((e) => e.name) ?? [];
-        assert.ok(
-            !labels.includes('id'),
-            'completion must be suppressed by flag',
-        );
-        assert.ok(
-            !labels.includes('title'),
-            'completion must be suppressed by flag',
-        );
+        assert.ok(!labels.includes('id'), 'completion must be suppressed by flag');
+        assert.ok(!labels.includes('title'), 'completion must be suppressed by flag');
     });
 
     it('getCompletionEntryDetails returns code action for cds: source', () => {
         const src = 'const r = cds.ql`SELECT id FROM Books`;\nexport {};';
         const pos = posOf(src, 'Books');
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER);
-        const details = proxy.getCompletionEntryDetails(
-            'test.ts',
-            pos,
-            'Books',
-            undefined,
-            'cds:Svc.Books',
-            undefined,
-            undefined,
-        );
-        assert.ok(
-            details?.codeActions?.length,
-            'expected code action from cds: source',
-        );
+        const details = proxy.getCompletionEntryDetails('test.ts', pos, 'Books', undefined, 'cds:Svc.Books', undefined, undefined);
+        assert.ok(details?.codeActions?.length, 'expected code action from cds: source');
         const action = details.codeActions[0];
-        assert.ok(
-            action.changes[0].textChanges[0].newText.includes(
-                '@cds-service Svc',
-            ),
-        );
+        assert.ok(action.changes[0].textChanges[0].newText.includes('@cds-service Svc'));
     });
 
     it('getCompletionEntryDetails scopes to the full dotted service name, not the first segment', () => {
         // Regression: CAP service names are dotted namespaces. Entity
         // `sap.capire.hotels.Hotels` belongs to service `sap.capire.hotels`.
         // The annotation must carry the whole prefix, not just "sap".
-        const src =
-            'const r = cds.ql`SELECT * FROM sap.capire.hotels.Hotels`;\nexport {};';
+        const src = 'const r = cds.ql`SELECT * FROM sap.capire.hotels.Hotels`;\nexport {};';
         const pos = posOf(src, 'Hotels');
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER);
-        const details = proxy.getCompletionEntryDetails(
-            'test.ts',
-            pos,
-            'Hotels',
-            undefined,
-            'cds:sap.capire.hotels.Hotels',
-            undefined,
-            undefined,
-        );
-        assert.ok(
-            details?.codeActions?.length,
-            'expected code action from cds: source',
-        );
-        const newText =
-            details.codeActions[0].changes[0].textChanges[0].newText;
-        assert.ok(
-            newText.includes('@cds-service sap.capire.hotels'),
-            `annotation must carry full service prefix; got: ${JSON.stringify(newText)}`,
-        );
-        assert.ok(
-            !/@cds-service sap\b(?!\.)/.test(newText),
-            'annotation must not scope to the first segment "sap" alone',
-        );
+        const details = proxy.getCompletionEntryDetails('test.ts', pos, 'Hotels', undefined, 'cds:sap.capire.hotels.Hotels', undefined, undefined);
+        assert.ok(details?.codeActions?.length, 'expected code action from cds: source');
+        const newText = details.codeActions[0].changes[0].textChanges[0].newText;
+        assert.ok(newText.includes('@cds-service sap.capire.hotels'), `annotation must carry full service prefix; got: ${JSON.stringify(newText)}`);
+        assert.ok(!/@cds-service sap\b(?!\.)/.test(newText), 'annotation must not scope to the first segment "sap" alone');
     });
 
     it('getCompletionEntryDetails passes through when source is not cds:', () => {
@@ -495,22 +346,9 @@ describe('Plugin proxy — completions', () => {
         const pos = posOf(src, 'Books');
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER);
         // Non-cds source → falls through to base (null for unknown entry)
-        const details = proxy.getCompletionEntryDetails(
-            'test.ts',
-            pos,
-            'Books',
-            undefined,
-            'ts:Books',
-            undefined,
-            undefined,
-        );
+        const details = proxy.getCompletionEntryDetails('test.ts', pos, 'Books', undefined, 'ts:Books', undefined, undefined);
         // We just want no code-action injected, not a crash
-        assert.ok(
-            !details?.codeActions?.some((a) =>
-                a.description.includes('cds-service'),
-            ),
-            'non-cds source must not get cds annotation action',
-        );
+        assert.ok(!details?.codeActions?.some((a) => a.description.includes('cds-service')), 'non-cds source must not get cds annotation action');
     });
 
     it('feature flag cds.ql.completion=false suppresses completion entry details', () => {
@@ -519,19 +357,8 @@ describe('Plugin proxy — completions', () => {
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER, {
             'cds.ql.completion': false,
         });
-        const details = proxy.getCompletionEntryDetails(
-            'test.ts',
-            pos,
-            'Books',
-            undefined,
-            'cds:Svc.Books',
-            undefined,
-            undefined,
-        );
-        assert.ok(
-            !details?.codeActions?.length,
-            'code action must be suppressed when completion flag is false',
-        );
+        const details = proxy.getCompletionEntryDetails('test.ts', pos, 'Books', undefined, 'cds:Svc.Books', undefined, undefined);
+        assert.ok(!details?.codeActions?.length, 'code action must be suppressed when completion flag is false');
     });
 });
 
@@ -547,15 +374,11 @@ describe('Plugin proxy — hover', () => {
         const info = proxy.getQuickInfoAtPosition('test.ts', pos);
         assert.ok(info, 'expected hover info');
         const text = (info.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('cds field'),
-            'expected "cds field" in hover text, got: ' + text,
-        );
+        assert.ok(text.includes('cds field'), 'expected "cds field" in hover text, got: ' + text);
     });
 
     it('returns CDS hover info for cursor on result variable', () => {
-        const src =
-            'const r = await cds.ql`SELECT * FROM Books                      `;\nconsole.log(r);\nexport {};';
+        const src = 'const r = await cds.ql`SELECT * FROM Books                      `;\nconsole.log(r);\nexport {};';
         // Use position of 'r' in 'console.log(r)' — NOT lastIndexOf which hits 'export'
         const pos = src.indexOf('console.log(r)') + 'console.log('.length;
         // Result-variable hover resolves the row type through the batch worker (same
@@ -574,14 +397,8 @@ describe('Plugin proxy — hover', () => {
         const info = proxy.getQuickInfoAtPosition('test.ts', pos);
         assert.ok(info, 'expected hover info on result variable');
         const text = (info.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('id') || text.includes('title'),
-            'hover must show inferred fields, got: ' + text,
-        );
-        assert.ok(
-            !text.includes('undefined'),
-            'hover must not show "undefined", got: ' + text,
-        );
+        assert.ok(text.includes('id') || text.includes('title'), 'hover must show inferred fields, got: ' + text);
+        assert.ok(!text.includes('undefined'), 'hover must not show "undefined", got: ' + text);
     });
 
     it('falls through to TS hover when cursor is not on a cds.ql-related node', () => {
@@ -591,15 +408,11 @@ describe('Plugin proxy — hover', () => {
         const info = proxy.getQuickInfoAtPosition('test.ts', pos);
         // TS hover for `foo: number` — CDS must not interfere
         const text = info?.displayParts?.map((p) => p.text).join('') ?? '';
-        assert.ok(
-            !text.includes('cds field'),
-            'CDS hover must not appear for non-cql identifier',
-        );
+        assert.ok(!text.includes('cds field'), 'CDS hover must not appear for non-cql identifier');
     });
 
     it('feature flag cds.ql.hover=false falls through to TS hover', () => {
-        const src =
-            'const r = await cds.ql`SELECT * FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT * FROM Books                      `;\nexport {};';
         const pos = posOf(src, 'r'); // 'r' in 'const r'
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER, {
             'cds.ql.hover': false,
@@ -607,10 +420,7 @@ describe('Plugin proxy — hover', () => {
         const info = proxy.getQuickInfoAtPosition('test.ts', pos);
         // With the flag off, TS hover is returned. It will show the _qN alias, not a CDS type.
         const text = info?.displayParts?.map((p) => p.text).join('') ?? '';
-        assert.ok(
-            !(text.includes('id: string') || text.includes('title: string')),
-            'CDS field types must be suppressed by hover flag, got: ' + text,
-        );
+        assert.ok(!(text.includes('id: string') || text.includes('title: string')), 'CDS field types must be suppressed by hover flag, got: ' + text);
     });
 });
 
@@ -655,11 +465,7 @@ describe('Plugin proxy — diagnostics', () => {
         });
         const diags = proxy.getSemanticDiagnostics('test.ts');
         const cdsDiags = diags.filter((d) => d.source === 'cds');
-        assert.equal(
-            cdsDiags.length,
-            0,
-            'CDS diagnostics must be suppressed by flag',
-        );
+        assert.equal(cdsDiags.length, 0, 'CDS diagnostics must be suppressed by flag');
     });
 
     it('returns only TS diagnostics when file has no cds.ql', () => {
@@ -679,8 +485,7 @@ describe('Plugin proxy — classification token filtering', () => {
     it('getEncodedSyntacticClassifications returns original-source tokens (template literal present)', () => {
         // The fix: syntactic classifications are run against the ORIGINAL source so the
         // template literal token is returned with its full span, not the cast tokens.
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
         const { proxy, rewrittenRanges } = createProxy(
             'test.ts',
             src,
@@ -696,10 +501,7 @@ describe('Plugin proxy — classification token filtering', () => {
         assert.ok(ranges.length > 0, 'expected at least one rewritten range');
 
         const span = { start: 0, length: src.length };
-        const result = proxy.getEncodedSyntacticClassifications(
-            'test.ts',
-            span,
-        );
+        const result = proxy.getEncodedSyntacticClassifications('test.ts', span);
 
         // The template literal token must be present — original source classification
         const tplStart = src.indexOf('`');
@@ -707,31 +509,21 @@ describe('Plugin proxy — classification token filtering', () => {
         const tplLen = tplEnd - tplStart;
         let foundTemplate = false;
         for (let i = 0; i < result.spans.length; i += 3) {
-            if (
-                result.spans[i] === tplStart &&
-                result.spans[i + 1] === tplLen
-            ) {
+            if (result.spans[i] === tplStart && result.spans[i + 1] === tplLen) {
                 foundTemplate = true;
                 break;
             }
         }
-        assert.ok(
-            foundTemplate,
-            `template literal token [${tplStart},${tplLen}) must be present in syntactic classifications`,
-        );
+        assert.ok(foundTemplate, `template literal token [${tplStart},${tplLen}) must be present in syntactic classifications`);
 
         // No token should go beyond original source length
         for (let i = 0; i < result.spans.length; i += 3) {
-            assert.ok(
-                result.spans[i] < src.length,
-                `token at ${result.spans[i]} must be within original source bounds`,
-            );
+            assert.ok(result.spans[i] < src.length, `token at ${result.spans[i]} must be within original source bounds`);
         }
     });
 
     it('getEncodedSemanticClassifications filters tokens in rewritten ranges', () => {
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
         const { proxy, rewrittenRanges } = createProxy(
             'test.ts',
             src,
@@ -747,36 +539,19 @@ describe('Plugin proxy — classification token filtering', () => {
         assert.ok(ranges.length > 0, 'expected at least one rewritten range');
 
         const span = { start: 0, length: src.length };
-        const result = proxy.getEncodedSemanticClassifications(
-            'test.ts',
-            span,
-            TS.SemanticClassificationFormat.TwentyTwenty,
-        );
+        const result = proxy.getEncodedSemanticClassifications('test.ts', span, TS.SemanticClassificationFormat.TwentyTwenty);
 
         for (let i = 0; i < result.spans.length; i += 3) {
             const tokStart = result.spans[i];
-            const inRange = ranges.some(
-                (r) => tokStart >= r.start && tokStart < r.end,
-            );
-            assert.ok(
-                !inRange,
-                `semantic token at ${tokStart} falls within rewritten range`,
-            );
+            const inRange = ranges.some((r) => tokStart >= r.start && tokStart < r.end);
+            assert.ok(!inRange, `semantic token at ${tokStart} falls within rewritten range`);
         }
     });
 
     it('classifications are unchanged when there are no rewritten ranges', () => {
         const src = 'const foo = 42;\nexport {};';
-        const { proxy, rewrittenRanges } = createProxy(
-            'test.ts',
-            src,
-            EMPTY_WORKER,
-        );
-        assert.equal(
-            (rewrittenRanges.get('test.ts') ?? []).length,
-            0,
-            'no rewritten ranges for file without cds.ql',
-        );
+        const { proxy, rewrittenRanges } = createProxy('test.ts', src, EMPTY_WORKER);
+        assert.equal((rewrittenRanges.get('test.ts') ?? []).length, 0, 'no rewritten ranges for file without cds.ql');
         // Should not throw and should return some spans
         const result = proxy.getEncodedSyntacticClassifications('test.ts', {
             start: 0,
@@ -792,87 +567,47 @@ describe('Plugin proxy — classification token filtering', () => {
 
 describe('Plugin proxy — feature flags are independent', () => {
     it('disabling hover does not affect completions', () => {
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER, {
             'cds.ql.completion': true,
             'cds.ql.hover': false,
         });
         const pos = posOf(src, 'id');
-        const info = proxy.getCompletionsAtPosition(
-            'test.ts',
-            pos,
-            undefined,
-            undefined,
-        );
+        const info = proxy.getCompletionsAtPosition('test.ts', pos, undefined, undefined);
         const labels = info?.entries.map((e) => e.name) ?? [];
-        assert.ok(
-            labels.includes('id') || labels.includes('title'),
-            'completions must still work when hover is disabled',
-        );
+        assert.ok(labels.includes('id') || labels.includes('title'), 'completions must still work when hover is disabled');
     });
 
     it('disabling diagnostics does not affect completions', () => {
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER, {
             'cds.ql.completion': true,
             'cds.ql.diagnostics': false,
         });
         const pos = posOf(src, 'id');
-        const info = proxy.getCompletionsAtPosition(
-            'test.ts',
-            pos,
-            undefined,
-            undefined,
-        );
+        const info = proxy.getCompletionsAtPosition('test.ts', pos, undefined, undefined);
         const labels = info?.entries.map((e) => e.name) ?? [];
-        assert.ok(
-            labels.includes('id') || labels.includes('title'),
-            'completions must still work when diagnostics are disabled',
-        );
+        assert.ok(labels.includes('id') || labels.includes('title'), 'completions must still work when diagnostics are disabled');
     });
 
     it('all flags false: proxy behaves like plain TS language service', () => {
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER, {
             'cds.ql.completion': false,
             'cds.ql.hover': false,
             'cds.ql.diagnostics': false,
         });
         const completionPos = posOf(src, 'id');
-        const completions = proxy.getCompletionsAtPosition(
-            'test.ts',
-            completionPos,
-            undefined,
-            undefined,
-        );
+        const completions = proxy.getCompletionsAtPosition('test.ts', completionPos, undefined, undefined);
         const labels = completions?.entries.map((e) => e.name) ?? [];
-        assert.ok(
-            !(labels.includes('id') || labels.includes('title')),
-            'with all flags off, CDS completions must be absent',
-        );
+        assert.ok(!(labels.includes('id') || labels.includes('title')), 'with all flags off, CDS completions must be absent');
 
         const hover = proxy.getQuickInfoAtPosition('test.ts', posOf(src, 'r'));
-        const hoverText =
-            hover?.displayParts?.map((p) => p.text).join('') ?? '';
-        assert.ok(
-            !(
-                hoverText.includes('id: string') ||
-                hoverText.includes('title: string')
-            ),
-            'with all flags off, CDS hover must be absent',
-        );
+        const hoverText = hover?.displayParts?.map((p) => p.text).join('') ?? '';
+        assert.ok(!(hoverText.includes('id: string') || hoverText.includes('title: string')), 'with all flags off, CDS hover must be absent');
 
-        const diags = proxy
-            .getSemanticDiagnostics('test.ts')
-            .filter((d) => d.source === 'cds');
-        assert.equal(
-            diags.length,
-            0,
-            'with all flags off, CDS diagnostics must be absent',
-        );
+        const diags = proxy.getSemanticDiagnostics('test.ts').filter((d) => d.source === 'cds');
+        assert.equal(diags.length, 0, 'with all flags off, CDS diagnostics must be absent');
     });
 });
 
@@ -898,10 +633,7 @@ describe('Plugin proxy — typeInference flag', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
 
         let patchedGetSnapshot = () => baseSnap;
         const fakeInfo = {
@@ -925,11 +657,7 @@ describe('Plugin proxy — typeInference flag', () => {
         mod.create(fakeInfo);
         const result = patchedGetSnapshot(fileName);
 
-        assert.equal(
-            result,
-            baseSnap,
-            'original base snapshot must be returned when typeInference is false',
-        );
+        assert.equal(result, baseSnap, 'original base snapshot must be returned when typeInference is false');
     });
 
     it('typeInference=true: getScriptSnapshot enters the rewrite path without throwing', () => {
@@ -949,10 +677,7 @@ describe('Plugin proxy — typeInference flag', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
 
         let patchedGetSnapshot = () => baseSnap;
         const fakeInfo = {
@@ -977,10 +702,7 @@ describe('Plugin proxy — typeInference flag', () => {
         // Rewrite path is entered (no short-circuit). Worker fails (no @sap/cds) so rewritten===src,
         // but the path was taken — verified by no exception and by contrast with the false-case test
         // which asserts result===baseSnap via the early-return guard.
-        assert.doesNotThrow(
-            () => patchedGetSnapshot(fileName),
-            'rewrite path must not throw when typeInference is true',
-        );
+        assert.doesNotThrow(() => patchedGetSnapshot(fileName), 'rewrite path must not throw when typeInference is true');
     });
 });
 
@@ -988,10 +710,7 @@ describe('onConfigurationChanged', () => {
     const module_ = pluginFactory({ typescript: TS });
 
     it('plugin module exposes onConfigurationChanged', () => {
-        assert.equal(
-            typeof module_.onConfigurationChanged,
-            'function',
-        );
+        assert.equal(typeof module_.onConfigurationChanged, 'function');
     });
 
     it('onConfigurationChanged updates config — all false disables all features', () => {
@@ -1001,38 +720,20 @@ describe('onConfigurationChanged', () => {
         const originalSource = new Map([[fileName, src]]);
         const rewriteCache = new Map();
         const rewrittenRanges = new Map();
-        const rewritten = rewriteSnapshot(
-            fileName,
-            src,
-            TS,
-            originalSource,
-            rewriteCache,
-            EMPTY_WORKER,
-            BOOKS_BATCH_WORKER,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-            rewrittenRanges,
-        );
+        const rewritten = rewriteSnapshot(fileName, src, TS, originalSource, rewriteCache, EMPTY_WORKER, BOOKS_BATCH_WORKER, NO_LOGGER, '/proj', undefined, rewrittenRanges);
 
         const lsHost = {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName
-                    ? TS.ScriptSnapshot.fromString(rewritten)
-                    : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(rewritten) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
 
         const fakeInfo = {
             config: {
@@ -1055,12 +756,7 @@ describe('onConfigurationChanged', () => {
 
         // after create() all flags are on — CDS completions should be present
         const posId = posOf(src, 'id');
-        const before = proxy.getCompletionsAtPosition(
-            fileName,
-            posId,
-            undefined,
-            undefined,
-        );
+        const before = proxy.getCompletionsAtPosition(fileName, posId, undefined, undefined);
 
         // now turn everything off via onConfigurationChanged
         module_.onConfigurationChanged({
@@ -1069,14 +765,8 @@ describe('onConfigurationChanged', () => {
             'cds.ql.diagnostics': false,
         });
 
-        const afterDiag = proxy
-            .getSemanticDiagnostics(fileName)
-            .filter((d) => d.source === 'cds');
-        assert.equal(
-            afterDiag.length,
-            0,
-            'diagnostics disabled after onConfigurationChanged',
-        );
+        const afterDiag = proxy.getSemanticDiagnostics(fileName).filter((d) => d.source === 'cds');
+        assert.equal(afterDiag.length, 0, 'diagnostics disabled after onConfigurationChanged');
     });
 
     it('onConfigurationChanged updates config — enabling typeInference', () => {
@@ -1104,18 +794,14 @@ describe('onConfigurationChanged', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const fakeInfo2 = {
             config: {},
             languageService: ls,
@@ -1130,16 +816,8 @@ describe('onConfigurationChanged', () => {
         };
         const proxy2 = module_.create(fakeInfo2);
         const span = { start: 0, length: src.length };
-        assert.doesNotThrow(() =>
-            proxy2.getEncodedSyntacticClassifications(fileName, span),
-        );
-        assert.doesNotThrow(() =>
-            proxy2.getEncodedSemanticClassifications(
-                fileName,
-                span,
-                TS.SemanticClassificationFormat.TwentyTwenty,
-            ),
-        );
+        assert.doesNotThrow(() => proxy2.getEncodedSyntacticClassifications(fileName, span));
+        assert.doesNotThrow(() => proxy2.getEncodedSemanticClassifications(fileName, span, TS.SemanticClassificationFormat.TwentyTwenty));
     });
 
     it('real proxy languageServiceHost.getScriptSnapshot rewrites when typeInference on', () => {
@@ -1152,9 +830,7 @@ describe('onConfigurationChanged', () => {
             getScriptVersion: () => '1',
             getScriptSnapshot: (f) => {
                 snapshotCallCount++;
-                return f === fileName
-                    ? TS.ScriptSnapshot.fromString(src)
-                    : undefined;
+                return f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined;
             },
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
@@ -1162,10 +838,7 @@ describe('onConfigurationChanged', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const patchedHost = {
             getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
         };
@@ -1181,9 +854,7 @@ describe('onConfigurationChanged', () => {
         };
         module_.create(fakeInfo3);
         // languageServiceHost.getScriptSnapshot should have been patched — calling it should not throw
-        assert.doesNotThrow(() =>
-            patchedHost.getScriptSnapshot(fileName),
-        );
+        assert.doesNotThrow(() => patchedHost.getScriptSnapshot(fileName));
     });
 
     it('real proxy getQuickInfoAtPosition and getCompletionEntryDetails pass through when flags off', () => {
@@ -1193,18 +864,14 @@ describe('onConfigurationChanged', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const fakeInfo4 = {
             config: { 'cds.ql.hover': false, 'cds.ql.completion': false },
             languageService: ls,
@@ -1219,17 +886,7 @@ describe('onConfigurationChanged', () => {
         };
         const proxy4 = module_.create(fakeInfo4);
         assert.doesNotThrow(() => proxy4.getQuickInfoAtPosition(fileName, 10));
-        assert.doesNotThrow(() =>
-            proxy4.getCompletionEntryDetails(
-                fileName,
-                10,
-                'id',
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-            ),
-        );
+        assert.doesNotThrow(() => proxy4.getCompletionEntryDetails(fileName, 10, 'id', undefined, undefined, undefined, undefined));
     });
 
     it('real proxy — all flags on: executes resolveQueryContext path for all proxy methods', () => {
@@ -1237,8 +894,7 @@ describe('onConfigurationChanged', () => {
         // populates originalSource so that resolveQueryContext returns a non-null context.
         // The real execFileSync worker will fail (no built .js in tests), but runWorker's
         // try/catch returns null, so rewriteSnapshot and all CDS logic handles it gracefully.
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
         const fileName = 'rp-all-flags.ts';
         const baseSnap = TS.ScriptSnapshot.fromString(src);
         const lsHost = {
@@ -1252,10 +908,7 @@ describe('onConfigurationChanged', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const patchedHost5 = {
             getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
         };
@@ -1283,45 +936,18 @@ describe('onConfigurationChanged', () => {
         assert.doesNotThrow(() => proxy5.getSemanticDiagnostics(fileName));
 
         // Exercise getCompletionsAtPosition with flags on → enters resolveQueryContext path
-        assert.doesNotThrow(() =>
-            proxy5.getCompletionsAtPosition(
-                fileName,
-                src.indexOf('id'),
-                undefined,
-                undefined,
-            ),
-        );
+        assert.doesNotThrow(() => proxy5.getCompletionsAtPosition(fileName, src.indexOf('id'), undefined, undefined));
 
         // Exercise getCompletionEntryDetails with cds: source and flags on → enters resolveQueryContext path
-        assert.doesNotThrow(() =>
-            proxy5.getCompletionEntryDetails(
-                fileName,
-                src.indexOf('Books'),
-                'Books',
-                undefined,
-                'cds:Svc.Books',
-                undefined,
-                undefined,
-            ),
-        );
+        assert.doesNotThrow(() => proxy5.getCompletionEntryDetails(fileName, src.indexOf('Books'), 'Books', undefined, 'cds:Svc.Books', undefined, undefined));
 
         // Exercise getQuickInfoAtPosition with flags on → enters resolveQueryContext path
-        assert.doesNotThrow(() =>
-            proxy5.getQuickInfoAtPosition(fileName, src.indexOf('id')),
-        );
+        assert.doesNotThrow(() => proxy5.getQuickInfoAtPosition(fileName, src.indexOf('id')));
 
         // Exercise getEncodedSyntacticClassifications / Semantic (hits patchScriptInfo + filterClassifications)
         const span = { start: 0, length: src.length };
-        assert.doesNotThrow(() =>
-            proxy5.getEncodedSyntacticClassifications(fileName, span),
-        );
-        assert.doesNotThrow(() =>
-            proxy5.getEncodedSemanticClassifications(
-                fileName,
-                span,
-                TS.SemanticClassificationFormat.TwentyTwenty,
-            ),
-        );
+        assert.doesNotThrow(() => proxy5.getEncodedSyntacticClassifications(fileName, span));
+        assert.doesNotThrow(() => proxy5.getEncodedSemanticClassifications(fileName, span, TS.SemanticClassificationFormat.TwentyTwenty));
     });
 
     it('real proxy — patchScriptInfo body via fake scriptInfo', () => {
@@ -1342,10 +968,7 @@ describe('onConfigurationChanged', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
 
         // Fake scriptInfo — minimal implementation of the tsserver ScriptInfo API
         const fakeScriptInfo = {
@@ -1366,8 +989,7 @@ describe('onConfigurationChanged', () => {
             languageService: ls,
             project: {
                 projectService: { logger: NO_LOGGER },
-                getScriptInfo: (fn) =>
-                    fn === fileName ? fakeScriptInfo : null,
+                getScriptInfo: (fn) => (fn === fileName ? fakeScriptInfo : null),
                 updateGraph: () => {},
             },
             languageServiceHost: patchedHost6,
@@ -1376,23 +998,14 @@ describe('onConfigurationChanged', () => {
         const proxy6 = module_.create(fakeInfo6);
 
         // Calling getSemanticDiagnostics triggers patchScriptInfo → patchScriptInfoImpl
-        assert.doesNotThrow(
-            () => proxy6.getSemanticDiagnostics(fileName),
-            'patchScriptInfoImpl must not throw with fake scriptInfo',
-        );
+        assert.doesNotThrow(() => proxy6.getSemanticDiagnostics(fileName), 'patchScriptInfoImpl must not throw with fake scriptInfo');
 
         // Now call the patched getSnapshot directly to exercise the lambda body
         // (typeInference=false → condition !config['cds.ql.typeInference'] is true → returns base)
-        assert.doesNotThrow(
-            () => fakeScriptInfo.getSnapshot(),
-            'patched getSnapshot lambda must not throw with typeInference=false',
-        );
+        assert.doesNotThrow(() => fakeScriptInfo.getSnapshot(), 'patched getSnapshot lambda must not throw with typeInference=false');
 
         // Calling it again should skip patching (already has __cdsPatchedSnapshot)
-        assert.doesNotThrow(
-            () => proxy6.getSemanticDiagnostics(fileName),
-            'second call must skip patching without error',
-        );
+        assert.doesNotThrow(() => proxy6.getSemanticDiagnostics(fileName), 'second call must skip patching without error');
     });
 
     it('real proxy — patchScriptInfo inner lambda with typeInference=true', () => {
@@ -1413,10 +1026,7 @@ describe('onConfigurationChanged', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const lsTi = TS.createLanguageService(
-            lsHostTi,
-            TS.createDocumentRegistry(),
-        );
+        const lsTi = TS.createLanguageService(lsHostTi, TS.createDocumentRegistry());
 
         const fakeScriptInfoTi = {
             getSnapshot: () => baseSnap,
@@ -1436,8 +1046,7 @@ describe('onConfigurationChanged', () => {
             languageService: lsTi,
             project: {
                 projectService: { logger: NO_LOGGER },
-                getScriptInfo: (fn) =>
-                    fn === fileName ? fakeScriptInfoTi : null,
+                getScriptInfo: (fn) => (fn === fileName ? fakeScriptInfoTi : null),
                 updateGraph: () => {},
             },
             languageServiceHost: patchedHostTi,
@@ -1450,10 +1059,7 @@ describe('onConfigurationChanged', () => {
 
         // Call the patched lambda with typeInference=true → enters originalSource.set + doRewrite
         // Worker may fail (no real cds project at /proj), rewritten===src → returns base
-        assert.doesNotThrow(
-            () => fakeScriptInfoTi.getSnapshot(),
-            'patched getSnapshot lambda must not throw with typeInference=true',
-        );
+        assert.doesNotThrow(() => fakeScriptInfoTi.getSnapshot(), 'patched getSnapshot lambda must not throw with typeInference=true');
     });
 
     it('real proxy — non-overridden method goes through proxy loop lambda', () => {
@@ -1465,18 +1071,14 @@ describe('onConfigurationChanged', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const lsNl = TS.createLanguageService(
-            lsHostNl,
-            TS.createDocumentRegistry(),
-        );
+        const lsNl = TS.createLanguageService(lsHostNl, TS.createDocumentRegistry());
         const fakeInfoNl = {
             config: {},
             languageService: lsNl,
@@ -1491,10 +1093,7 @@ describe('onConfigurationChanged', () => {
         };
         const proxyNl = module_.create(fakeInfoNl);
         // getDefinitionAtPosition is NOT overridden → goes through the generic proxy loop lambda
-        assert.doesNotThrow(
-            () => proxyNl.getDefinitionAtPosition(fileName, 6),
-            'non-overridden proxy method must pass through to base LS',
-        );
+        assert.doesNotThrow(() => proxyNl.getDefinitionAtPosition(fileName, 6), 'non-overridden proxy method must pass through to base LS');
     });
 
     it('create() with info.config = undefined fires info.config ?? {} branch (line 283)', () => {
@@ -1505,18 +1104,14 @@ describe('onConfigurationChanged', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const fakeInfoNoConfig = {
             config: undefined,
             languageService: ls,
@@ -1529,10 +1124,7 @@ describe('onConfigurationChanged', () => {
                 getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
             },
         };
-        assert.doesNotThrow(
-            () => module_.create(fakeInfoNoConfig),
-            'create() with undefined config must not throw',
-        );
+        assert.doesNotThrow(() => module_.create(fakeInfoNoConfig), 'create() with undefined config must not throw');
     });
 
     it('filterSemanticClassifications: tokStart >= origLength drops tail-alias tokens and ranges filter drops range tokens', () => {
@@ -1547,47 +1139,23 @@ describe('onConfigurationChanged', () => {
 
         // Pre-compute the rewritten snapshot to serve to the TS LanguageService.
         const preRwRanges = new Map();
-        const preRewritten = rewriteSnapshot(
-            fileName,
-            src,
-            TS,
-            new Map([[fileName, src]]),
-            new Map(),
-            EMPTY_WORKER,
-            BOOKS_BATCH_WORKER,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-            preRwRanges,
-        );
-        assert.ok(
-            preRwRanges.has(fileName) && preRwRanges.get(fileName).length > 0,
-            'pre-check: rewrite must produce ranges for CQL source',
-        );
-        assert.ok(
-            preRewritten.length > src.length,
-            'pre-check: rewritten source must be longer than original (tail aliases appended)',
-        );
+        const preRewritten = rewriteSnapshot(fileName, src, TS, new Map([[fileName, src]]), new Map(), EMPTY_WORKER, BOOKS_BATCH_WORKER, NO_LOGGER, '/proj', undefined, preRwRanges);
+        assert.ok(preRwRanges.has(fileName) && preRwRanges.get(fileName).length > 0, 'pre-check: rewrite must produce ranges for CQL source');
+        assert.ok(preRewritten.length > src.length, 'pre-check: rewritten source must be longer than original (tail aliases appended)');
 
         // lsHost serves the *rewritten* text — so TS emits tokens beyond src.length
         const lsHostFc = {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName
-                    ? TS.ScriptSnapshot.fromString(preRewritten)
-                    : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(preRewritten) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const lsFc = TS.createLanguageService(
-            lsHostFc,
-            TS.createDocumentRegistry(),
-        );
+        const lsFc = TS.createLanguageService(lsHostFc, TS.createDocumentRegistry());
 
         const pluginOverrides = testOverrides();
         const origRw = pluginOverrides.rw;
@@ -1597,10 +1165,7 @@ describe('onConfigurationChanged', () => {
 
         // patchableHost returns the *original* source so doRewrite populates rewrittenRanges.
         const patchableHost = {
-            getScriptSnapshot: (f) =>
-                f === fileName
-                    ? TS.ScriptSnapshot.fromString(src)
-                    : lsHostFc.getScriptSnapshot(f),
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : lsHostFc.getScriptSnapshot(f)),
         };
         const fakeInfoFc = {
             config: { 'cds.ql.typeInference': true },
@@ -1626,33 +1191,20 @@ describe('onConfigurationChanged', () => {
         // tokens beyond origLength and tokens in rewritten ranges must be absent.
         let semResult;
         assert.doesNotThrow(() => {
-            semResult = proxyFc.getEncodedSemanticClassifications(
-                fileName,
-                span,
-                TS.SemanticClassificationFormat.TwentyTwenty,
-            );
+            semResult = proxyFc.getEncodedSemanticClassifications(fileName, span, TS.SemanticClassificationFormat.TwentyTwenty);
         }, 'getEncodedSemanticClassifications must not throw');
         assert.ok(semResult, 'must return a semantic classification result');
         for (let i = 0; i < semResult.spans.length; i += 3) {
             const tokStart = semResult.spans[i];
-            assert.ok(
-                tokStart < origLen,
-                `semantic token at ${tokStart} must be < origLength ${origLen}`,
-            );
-            assert.ok(
-                !ranges.some((r) => tokStart >= r.start && tokStart < r.end),
-                `semantic token at ${tokStart} must not fall in a rewritten range`,
-            );
+            assert.ok(tokStart < origLen, `semantic token at ${tokStart} must be < origLength ${origLen}`);
+            assert.ok(!ranges.some((r) => tokStart >= r.start && tokStart < r.end), `semantic token at ${tokStart} must not fall in a rewritten range`);
         }
 
         // getEncodedSyntacticClassifications uses withOriginalSnapshot (getScriptInfo→null
         // means no swap, falls through): must not throw and must return spans.
         let synResult;
         assert.doesNotThrow(() => {
-            synResult = proxyFc.getEncodedSyntacticClassifications(
-                fileName,
-                span,
-            );
+            synResult = proxyFc.getEncodedSyntacticClassifications(fileName, span);
         }, 'getEncodedSyntacticClassifications must not throw');
         assert.ok(synResult, 'must return a syntactic classification result');
 
@@ -1670,19 +1222,7 @@ describe('onConfigurationChanged', () => {
 
         // Pre-compute rewrite
         const preRwRanges = new Map();
-        const preRewritten = rewriteSnapshot(
-            fileName,
-            src,
-            TS,
-            new Map([[fileName, src]]),
-            new Map(),
-            EMPTY_WORKER,
-            BOOKS_BATCH_WORKER,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-            preRwRanges,
-        );
+        const preRewritten = rewriteSnapshot(fileName, src, TS, new Map([[fileName, src]]), new Map(), EMPTY_WORKER, BOOKS_BATCH_WORKER, NO_LOGGER, '/proj', undefined, preRwRanges);
 
         // Fake ScriptInfo with __cdsOrigSnap and __cdsPatchedSnapshot.
         // Its getSnapshot is mutable so withOriginalSnapshot can swap it.
@@ -1709,18 +1249,14 @@ describe('onConfigurationChanged', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? fakeScriptInfo.getSnapshot() : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? fakeScriptInfo.getSnapshot() : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const lsSwap = TS.createLanguageService(
-            lsHostSwap,
-            TS.createDocumentRegistry(),
-        );
+        const lsSwap = TS.createLanguageService(lsHostSwap, TS.createDocumentRegistry());
 
         const pluginOverrides = testOverrides();
         const origRw = pluginOverrides.rw;
@@ -1729,16 +1265,14 @@ describe('onConfigurationChanged', () => {
         pluginOverrides.rwBatch = BOOKS_BATCH_WORKER;
 
         const patchableHost = {
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
         };
         const fakeInfoSwap = {
             config: { 'cds.ql.typeInference': true },
             languageService: lsSwap,
             project: {
                 projectService: { logger: NO_LOGGER },
-                getScriptInfo: (f) =>
-                    f === fileName ? fakeScriptInfo : null,
+                getScriptInfo: (f) => (f === fileName ? fakeScriptInfo : null),
                 updateGraph: () => {},
             },
             languageServiceHost: patchableHost,
@@ -1757,27 +1291,18 @@ describe('onConfigurationChanged', () => {
         const span = { start: 0, length: src.length };
         let synResult;
         assert.doesNotThrow(() => {
-            synResult = proxySwap.getEncodedSyntacticClassifications(
-                fileName,
-                span,
-            );
+            synResult = proxySwap.getEncodedSyntacticClassifications(fileName, span);
         }, 'getEncodedSyntacticClassifications with __cdsOrigSnap must not throw');
         assert.ok(synResult, 'must return result');
 
         let foundTemplate = false;
         for (let i = 0; i < synResult.spans.length; i += 3) {
-            if (
-                synResult.spans[i] === tplStart &&
-                synResult.spans[i + 1] === tplLen
-            ) {
+            if (synResult.spans[i] === tplStart && synResult.spans[i + 1] === tplLen) {
                 foundTemplate = true;
                 break;
             }
         }
-        assert.ok(
-            foundTemplate,
-            `template literal token [${tplStart},${tplLen}) must appear when withOriginalSnapshot swaps to orig`,
-        );
+        assert.ok(foundTemplate, `template literal token [${tplStart},${tplLen}) must appear when withOriginalSnapshot swaps to orig`);
 
         pluginOverrides.rw = origRw;
         pluginOverrides.rwBatch = origRwBatch;
@@ -1800,15 +1325,11 @@ describe('cds-resolver-worker — subprocess invocation', () => {
     }
 
     function callWorkerEnv(extraEnv, ...args) {
-        const result = spawnSync(
-            process.execPath,
-            ['-r', 'tsx/cjs', workerSrc, ...args],
-            {
-                encoding: 'utf8',
-                timeout: 15000,
-                env: { ...process.env, ...extraEnv },
-            },
-        );
+        const result = spawnSync(process.execPath, ['-r', 'tsx/cjs', workerSrc, ...args], {
+            encoding: 'utf8',
+            timeout: 15000,
+            env: { ...process.env, ...extraEnv },
+        });
         if (!result.stdout?.trim()) return null;
         return JSON.parse(result.stdout.trim());
     }
@@ -1822,18 +1343,10 @@ describe('cds-resolver-worker — subprocess invocation', () => {
     it('returns error when projectRoot has no @sap/cds', () => {
         // Disable the global-install fallback so this is deterministic on machines
         // that DO have a global @sap/cds (which would otherwise resolve for /tmp).
-        const out = callWorkerEnv(
-            { CDS_LSP_NO_GLOBAL_FALLBACK: '1' },
-            '/tmp',
-            'SELECT id FROM Books',
-            '0',
-        );
+        const out = callWorkerEnv({ CDS_LSP_NO_GLOBAL_FALLBACK: '1' }, '/tmp', 'SELECT id FROM Books', '0');
         assert.ok(out, 'expected JSON output');
         assert.ok(out.error, 'expected error for missing @sap/cds');
-        assert.ok(
-            out.error.includes('@sap/cds'),
-            `expected error about @sap/cds, got: ${out.error}`,
-        );
+        assert.ok(out.error.includes('@sap/cds'), `expected error about @sap/cds, got: ${out.error}`);
     });
 
     it('returns completions when @sap/cds is available (cursor >= 0)', () => {
@@ -1851,23 +1364,16 @@ describe('cds-resolver-worker — subprocess invocation', () => {
         assert.ok(out, 'expected JSON output');
         assert.notEqual(out.error, 'missing arguments');
         // Either diagnostics array or a cds.load error — both are valid without a real model
-        assert.ok(
-            'diagnostics' in out || 'error' in out,
-            'expected diagnostics or error key',
-        );
+        assert.ok('diagnostics' in out || 'error' in out, 'expected diagnostics or error key');
     });
 
     it('--persistent mode: responds to a single request over stdin/stdout', async () => {
         // Covers the require.main --persistent branch: spawn the worker with --persistent,
         // write a JSON request, read the response, kill the process.
         const { spawn } = require('node:child_process');
-        const proc = spawn(
-            process.execPath,
-            ['-r', 'tsx/cjs', workerSrc, projectRoot, '--persistent'],
-            {
-                stdio: ['pipe', 'pipe', 'inherit'],
-            },
-        );
+        const proc = spawn(process.execPath, ['-r', 'tsx/cjs', workerSrc, projectRoot, '--persistent'], {
+            stdio: ['pipe', 'pipe', 'inherit'],
+        });
 
         const response = await new Promise((resolve, reject) => {
             let stdout = '';
@@ -1900,13 +1406,9 @@ describe('cds-resolver-worker — subprocess invocation', () => {
     it('--persistent mode: handles invalid JSON line gracefully', async () => {
         // Covers the try/catch around JSON.parse in the readline handler
         const { spawn } = require('node:child_process');
-        const proc = spawn(
-            process.execPath,
-            ['-r', 'tsx/cjs', workerSrc, projectRoot, '--persistent'],
-            {
-                stdio: ['pipe', 'pipe', 'inherit'],
-            },
-        );
+        const proc = spawn(process.execPath, ['-r', 'tsx/cjs', workerSrc, projectRoot, '--persistent'], {
+            stdio: ['pipe', 'pipe', 'inherit'],
+        });
 
         const response = await new Promise((resolve, reject) => {
             let stdout = '';
@@ -1942,10 +1444,7 @@ describe('cds-resolver-worker — subprocess invocation', () => {
                 }
             })
             .find((r) => r?.id === 99);
-        assert.ok(
-            resp,
-            'valid request after invalid line must still get a response',
-        );
+        assert.ok(resp, 'valid request after invalid line must still get a response');
     });
 });
 
@@ -1972,7 +1471,7 @@ describe('Plugin proxy — debounced rewriting', () => {
 
         global.setTimeout = (fn, delay) => {
             timers.push({ fn, delay });
-            return (timers.length - 1);
+            return timers.length - 1;
         };
         global.clearTimeout = (_id) => {
             /* no-op: last timer wins */
@@ -1984,18 +1483,14 @@ describe('Plugin proxy — debounced rewriting', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? currentSnap : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? currentSnap : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
 
         const scriptInfo = {
             getSnapshot: () => currentSnap,
@@ -2013,8 +1508,7 @@ describe('Plugin proxy — debounced rewriting', () => {
             languageService: ls,
             project: {
                 projectService: { logger: NO_LOGGER },
-                getScriptInfo: (fn) =>
-                    fn === fileName ? scriptInfo : null,
+                getScriptInfo: (fn) => (fn === fileName ? scriptInfo : null),
                 updateGraph: () => {},
             },
             languageServiceHost: {
@@ -2051,11 +1545,7 @@ describe('Plugin proxy — debounced rewriting', () => {
         try {
             proxy.getSemanticDiagnostics(fileName); // triggers patchScriptInfo
             scriptInfo.getSnapshot(); // cold-start doRewrite call
-            assert.equal(
-                timers.length,
-                0,
-                'cold start must not schedule a timer',
-            );
+            assert.equal(timers.length, 0, 'cold start must not schedule a timer');
         } finally {
             restore();
         }
@@ -2065,27 +1555,18 @@ describe('Plugin proxy — debounced rewriting', () => {
         // When the batch worker always fails (no CDS model), lastRewritten is never
         // populated, so every getSnapshot call takes the cold-start (synchronous) path
         // and no timer is ever scheduled — avoids caching a stale `any` result.
-        const { proxy, scriptInfo, timers, setSource, restore } =
-            makeDebounceProxy();
+        const { proxy, scriptInfo, timers, setSource, restore } = makeDebounceProxy();
         try {
             proxy.getSemanticDiagnostics(fileName); // cold start — synchronous
             scriptInfo.getSnapshot(); // worker miss → lastRewritten stays empty
-            assert.equal(
-                timers.length,
-                0,
-                'cold start with worker miss must not schedule a timer',
-            );
+            assert.equal(timers.length, 0, 'cold start with worker miss must not schedule a timer');
 
             // Edit the source — without lastRewritten set, next call is still cold-start
             const edited = src.replace('Books', 'Books ');
             setSource(edited);
 
             scriptInfo.getSnapshot();
-            assert.equal(
-                timers.length,
-                0,
-                'worker-miss edit must also not schedule a timer (retries synchronously)',
-            );
+            assert.equal(timers.length, 0, 'worker-miss edit must also not schedule a timer (retries synchronously)');
         } finally {
             restore();
         }
@@ -2094,27 +1575,18 @@ describe('Plugin proxy — debounced rewriting', () => {
     it('rapid cold-start retries do not accumulate timers when worker always misses', () => {
         // Multiple rapid calls on a worker-miss source must never schedule any timers —
         // the cold-start path is taken every time because lastRewritten is never set.
-        const { proxy, scriptInfo, timers, setSource, restore } =
-            makeDebounceProxy();
+        const { proxy, scriptInfo, timers, setSource, restore } = makeDebounceProxy();
         try {
             proxy.getSemanticDiagnostics(fileName); // cold start
 
             // Simulate two rapid keystrokes — both must be synchronous cold-starts
             setSource(src.replace('Books', 'Books '));
             scriptInfo.getSnapshot();
-            assert.equal(
-                timers.length,
-                0,
-                'first edit with worker miss: no timer',
-            );
+            assert.equal(timers.length, 0, 'first edit with worker miss: no timer');
 
             setSource(src.replace('Books', 'Books  '));
             scriptInfo.getSnapshot();
-            assert.equal(
-                timers.length,
-                0,
-                'second edit with worker miss: still no timer',
-            );
+            assert.equal(timers.length, 0, 'second edit with worker miss: still no timer');
         } finally {
             restore();
         }
@@ -2130,14 +1602,9 @@ describe('Plugin proxy — debounced rewriting', () => {
         const { existsSync, unlinkSync } = require('node:fs');
 
         const tmp = tmpdir();
-        const src2 =
-            'const r = await cds.ql`SELECT id FROM DebounceWrite`;\nexport {};';
+        const src2 = 'const r = await cds.ql`SELECT id FROM DebounceWrite`;\nexport {};';
         const fn2 = join(tmp, `debounce-write-${Date.now()}.ts`);
-        const key = createHash('sha1')
-            .update(tmp)
-            .update('\0')
-            .update(src2)
-            .digest('hex');
+        const key = createHash('sha1').update(tmp).update('\0').update(src2).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         try {
             unlinkSync(cachePath);
@@ -2146,12 +1613,7 @@ describe('Plugin proxy — debounced rewriting', () => {
         }
 
         const stubBatch = (_root, probes, _logger) => ({
-            fields: Object.fromEntries(
-                probes.map((p) => [
-                    p.entity,
-                    [{ label: 'id', detail: 'UUID', kind: 'field' }],
-                ]),
-            ),
+            fields: Object.fromEntries(probes.map((p) => [p.entity, [{ label: 'id', detail: 'UUID', kind: 'field' }]])),
         });
         testOverrides().rwBatch = stubBatch;
 
@@ -2182,10 +1644,7 @@ describe('Plugin proxy — debounced rewriting', () => {
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls2 = TS.createLanguageService(
-                lsHost2,
-                TS.createDocumentRegistry(),
-            );
+            const ls2 = TS.createLanguageService(lsHost2, TS.createDocumentRegistry());
             const si2 = {
                 getSnapshot: () => currentSnap,
                 markContainingProjectsAsDirty: () => {},
@@ -2202,8 +1661,7 @@ describe('Plugin proxy — debounced rewriting', () => {
                     updateGraph: () => {},
                 },
                 languageServiceHost: {
-                    getScriptSnapshot: (f) =>
-                        lsHost2.getScriptSnapshot(f),
+                    getScriptSnapshot: (f) => lsHost2.getScriptSnapshot(f),
                 },
             };
             const proxy2 = localModule.create(fakeInfo2);
@@ -2215,16 +1673,9 @@ describe('Plugin proxy — debounced rewriting', () => {
             const src2b = src2.replace('DebounceWrite', 'DebounceWrite ');
             currentSnap = TS.ScriptSnapshot.fromString(src2b);
             si2.getSnapshot();
-            assert.ok(
-                timers2.length > 0,
-                'debounce timer must be scheduled after source change',
-            );
+            assert.ok(timers2.length > 0, 'debounce timer must be scheduled after source change');
             // Fire the timer → writeDiskCache called (line 363)
-            const key2 = createHash('sha1')
-                .update(tmp)
-                .update('\0')
-                .update(src2b)
-                .digest('hex');
+            const key2 = createHash('sha1').update(tmp).update('\0').update(src2b).digest('hex');
             const cachePath2 = join(tmp, `cds-lsp-rewrite-${key2}.json`);
             try {
                 unlinkSync(cachePath2);
@@ -2232,10 +1683,7 @@ describe('Plugin proxy — debounced rewriting', () => {
                 /* ok */
             }
             for (const t of timers2.splice(0)) t.fn();
-            assert.ok(
-                existsSync(cachePath2),
-                'writeDiskCache must be called by debounce timer (line 363)',
-            );
+            assert.ok(existsSync(cachePath2), 'writeDiskCache must be called by debounce timer (line 363)');
             try {
                 unlinkSync(cachePath2);
             } catch {
@@ -2268,19 +1716,14 @@ describe('Plugin proxy — debounced rewriting', () => {
         const fn = join(tmp, `sync-cache-${Date.now()}.ts`);
         // Unique entity name so no stale disk-cache entry from a prior run can satisfy
         // the cold start without invoking the worker (the disk-cache key hashes source).
-        const srcA =
-            'const r = await cds.ql`SELECT id FROM SyncCacheEntity`;\nconst other = 1;\nexport {};';
+        const srcA = 'const r = await cds.ql`SELECT id FROM SyncCacheEntity`;\nconst other = 1;\nexport {};';
         // Edit BEFORE the query (prepend a line) — query text is identical, only
         // positions shift. The debounce path would otherwise serve a stale rewrite.
         const srcB = '// a new comment line\n' + srcA;
 
         // Clear any disk-cache entries for both revisions so cold start must hit the worker.
         for (const s of [srcA, srcB]) {
-            const key = createHash('sha1')
-                .update(tmp)
-                .update('\0')
-                .update(s)
-                .digest('hex');
+            const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
             try {
                 unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
             } catch {
@@ -2339,10 +1782,7 @@ describe('Plugin proxy — debounced rewriting', () => {
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const si = {
                 getSnapshot: () => currentSnap,
                 markContainingProjectsAsDirty: () => {},
@@ -2359,70 +1799,40 @@ describe('Plugin proxy — debounced rewriting', () => {
                     updateGraph: () => {},
                 },
                 languageServiceHost: {
-                    getScriptSnapshot: (f) =>
-                        lsHost.getScriptSnapshot(f),
+                    getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
                 },
             };
             const proxy = localModule.create(fakeInfo);
 
             // Cold start: resolves query A, populates rewriteCache + typeExprCache.
             proxy.getSemanticDiagnostics(fn);
-            const rewrittenA = si
-                .getSnapshot()
-                .getText(0, si.getSnapshot().getLength());
-            assert.ok(
-                rewrittenA.includes('as unknown as _q'),
-                'cold start must produce a rewrite',
-            );
+            const rewrittenA = si.getSnapshot().getText(0, si.getSnapshot().getLength());
+            assert.ok(rewrittenA.includes('as unknown as _q'), 'cold start must produce a rewrite');
             const callsAfterCold = calls;
             assert.ok(callsAfterCold > 0, 'cold start must call the worker');
 
             // Edit surrounding TS code (query text unchanged).
             currentSnap = TS.ScriptSnapshot.fromString(srcB);
-            const rewrittenB = si
-                .getSnapshot()
-                .getText(0, si.getSnapshot().getLength());
+            const rewrittenB = si.getSnapshot().getText(0, si.getSnapshot().getLength());
 
             // 1) No timer scheduled → the sync-cache branch handled it, not the debounce.
-            assert.equal(
-                timers.length,
-                0,
-                'editing surrounding code must NOT schedule a debounce timer (sync-cache hit)',
-            );
+            assert.equal(timers.length, 0, 'editing surrounding code must NOT schedule a debounce timer (sync-cache hit)');
             // 2) No new worker call → type reused from cache.
-            assert.equal(
-                calls,
-                callsAfterCold,
-                'editing surrounding code must NOT trigger a new worker call',
-            );
+            assert.equal(calls, callsAfterCold, 'editing surrounding code must NOT trigger a new worker call');
             // 3) The returned snapshot matches the LIVE buffer B: the cast sits at B's
             //    query position and the untouched prefix line is present. A stale rewrite
             //    (of A) would be missing the new comment line before the cast.
-            assert.ok(
-                rewrittenB.startsWith('// a new comment line\n'),
-                'sync rewrite must reflect the live buffer B, not the stale A',
-            );
-            assert.ok(
-                rewrittenB.includes('as unknown as _q'),
-                'sync rewrite must still contain the cast',
-            );
+            assert.ok(rewrittenB.startsWith('// a new comment line\n'), 'sync rewrite must reflect the live buffer B, not the stale A');
+            assert.ok(rewrittenB.includes('as unknown as _q'), 'sync rewrite must still contain the cast');
             // The cast must appear AFTER the new prefix line (i.e. reprojected forward),
             // proving positions track the live buffer.
-            assert.ok(
-                rewrittenB.indexOf('as unknown as _q') >
-                    rewrittenA.indexOf('as unknown as _q'),
-                'cast position must shift forward to match the edited buffer',
-            );
+            assert.ok(rewrittenB.indexOf('as unknown as _q') > rewrittenA.indexOf('as unknown as _q'), 'cast position must shift forward to match the edited buffer');
         } finally {
             global.setTimeout = origSetTimeout;
             global.clearTimeout = origClearTimeout;
             delete testOverrides().rwBatch;
             for (const s of [srcA, srcB]) {
-                const key = createHash('sha1')
-                    .update(tmp)
-                    .update('\0')
-                    .update(s)
-                    .digest('hex');
+                const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
                 try {
                     unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
                 } catch {
@@ -2458,17 +1868,10 @@ describe('Plugin proxy — debounced rewriting', () => {
             'export {};',
         ].join('\n');
         // Edit inside q1 only: add a space after FROM (q1's query text changes).
-        const srcB = srcA.replace(
-            'FROM SyncMultiAuthors`',
-            'FROM  SyncMultiAuthors`',
-        );
+        const srcB = srcA.replace('FROM SyncMultiAuthors`', 'FROM  SyncMultiAuthors`');
 
         for (const s of [srcA, srcB]) {
-            const key = createHash('sha1')
-                .update(tmp)
-                .update('\0')
-                .update(s)
-                .digest('hex');
+            const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
             try {
                 unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
             } catch {
@@ -2518,10 +1921,7 @@ describe('Plugin proxy — debounced rewriting', () => {
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const si = {
                 getSnapshot: () => currentSnap,
                 markContainingProjectsAsDirty: () => {},
@@ -2538,8 +1938,7 @@ describe('Plugin proxy — debounced rewriting', () => {
                     updateGraph: () => {},
                 },
                 languageServiceHost: {
-                    getScriptSnapshot: (f) =>
-                        lsHost.getScriptSnapshot(f),
+                    getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
                 },
             };
             const proxy = localModule.create(fakeInfo);
@@ -2550,52 +1949,26 @@ describe('Plugin proxy — debounced rewriting', () => {
 
             // Edit inside q1. q1 misses the type cache; q2/q3 hit it.
             currentSnap = TS.ScriptSnapshot.fromString(srcB);
-            const rewrittenB = si
-                .getSnapshot()
-                .getText(0, si.getSnapshot().getLength());
+            const rewrittenB = si.getSnapshot().getText(0, si.getSnapshot().getLength());
 
             // The served snapshot must be built from the LIVE buffer B: its untouched
             // suffix (the q2/q3 declarations) must be present verbatim from B, with casts
             // placed at their live positions — NOT a stale rewrite of A.
-            assert.ok(
-                rewrittenB.includes('FROM  SyncMultiAuthors'),
-                'served snapshot must reflect the live edit inside q1',
-            );
-            assert.ok(
-                /const \[\{ID\}\] = await cds\.ql`` as unknown as _q/.test(
-                    rewrittenB,
-                ),
-                'sibling query q2 must keep its cast at its live position (no flicker)',
-            );
-            assert.ok(
-                /const \[fst\] = await cds\.ql`` as unknown as _q/.test(
-                    rewrittenB,
-                ),
-                'sibling query q3 must keep its cast at its live position (no flicker)',
-            );
+            assert.ok(rewrittenB.includes('FROM  SyncMultiAuthors'), 'served snapshot must reflect the live edit inside q1');
+            assert.ok(/const \[\{ID\}\] = await cds\.ql`` as unknown as _q/.test(rewrittenB), 'sibling query q2 must keep its cast at its live position (no flicker)');
+            assert.ok(/const \[fst\] = await cds\.ql`` as unknown as _q/.test(rewrittenB), 'sibling query q3 must keep its cast at its live position (no flicker)');
             // A worker timer is scheduled to resolve q1's changed text.
-            assert.ok(
-                timers.length > 0,
-                'a worker timer must be scheduled for the changed query',
-            );
+            assert.ok(timers.length > 0, 'a worker timer must be scheduled for the changed query');
             // The prefix up to the edit is byte-identical to the live buffer — proves the
             // served snapshot is B-aligned, so semantic tokens need no reprojection.
             const editPos = srcB.indexOf('FROM  SyncMultiAuthors');
-            assert.equal(
-                rewrittenB.slice(0, editPos),
-                srcB.slice(0, editPos),
-                'served snapshot prefix must match the live buffer exactly',
-            );
+            assert.equal(rewrittenB.slice(0, editPos), srcB.slice(0, editPos), 'served snapshot prefix must match the live buffer exactly');
         } finally {
             global.setTimeout = origSetTimeout;
             global.clearTimeout = origClearTimeout;
             delete testOverrides().rwBatch;
             for (const s of [srcA, srcB]) {
-                const key = createHash('sha1')
-                    .update(tmp)
-                    .update('\0')
-                    .update(s)
-                    .digest('hex');
+                const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
                 try {
                     unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
                 } catch {
@@ -2630,19 +2003,12 @@ describe('Plugin proxy — debounced rewriting', () => {
         ].join('\n');
         // Edit INSIDE q1 (add a space): q1's text changes → partial snapshot served, so
         // the classifier would otherwise re-run against a degraded program.
-        const srcB = srcA.replace(
-            'FROM FreezeAuthors`',
-            'FROM  FreezeAuthors`',
-        );
+        const srcB = srcA.replace('FROM FreezeAuthors`', 'FROM  FreezeAuthors`');
         const editPos = srcB.indexOf('FROM  FreezeAuthors') + 'FROM '.length; // inserted char
         const delta = srcB.length - srcA.length; // +1
 
         for (const s of [srcA, srcB]) {
-            const key = createHash('sha1')
-                .update(tmp)
-                .update('\0')
-                .update(s)
-                .digest('hex');
+            const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
             try {
                 unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
             } catch {
@@ -2689,10 +2055,7 @@ describe('Plugin proxy — debounced rewriting', () => {
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const si = {
                 getSnapshot: () => currentSnap,
                 markContainingProjectsAsDirty: () => {},
@@ -2709,8 +2072,7 @@ describe('Plugin proxy — debounced rewriting', () => {
                     updateGraph: () => {},
                 },
                 languageServiceHost: {
-                    getScriptSnapshot: (f) =>
-                        lsHost.getScriptSnapshot(f),
+                    getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
                 },
             };
             const proxy = localModule.create(fakeInfo);
@@ -2719,25 +2081,14 @@ describe('Plugin proxy — debounced rewriting', () => {
             proxy.getSemanticDiagnostics(fn);
             si.getSnapshot();
             const spanA = { start: 0, length: srcA.length };
-            const semA = proxy.getEncodedSemanticClassifications(
-                fn,
-                spanA,
-                Fmt,
-            );
-            assert.ok(
-                semA.spans.length > 0,
-                'fully-resolved A must produce semantic tokens to freeze',
-            );
+            const semA = proxy.getEncodedSemanticClassifications(fn, spanA, Fmt);
+            assert.ok(semA.spans.length > 0, 'fully-resolved A must produce semantic tokens to freeze');
 
             // Edit inside q1 → transition (partial snapshot). Request semantic classifications.
             currentSnap = TS.ScriptSnapshot.fromString(srcB);
             si.getSnapshot();
             const spanB = { start: 0, length: srcB.length };
-            const semB = proxy.getEncodedSemanticClassifications(
-                fn,
-                spanB,
-                Fmt,
-            );
+            const semB = proxy.getEncodedSemanticClassifications(fn, spanB, Fmt);
 
             // Build the expected FROZEN result: A's tokens, each reprojected by +delta if
             // it starts at/after the edit. Same count, same classification ids.
@@ -2747,22 +2098,13 @@ describe('Plugin proxy — debounced rewriting', () => {
                 const p = s >= editPos ? s + delta : s;
                 expected.push(p, semA.spans[i + 1], semA.spans[i + 2]);
             }
-            assert.deepEqual(
-                semB.spans,
-                expected,
-                'transition semantic tokens must equal the fully-resolved baseline reprojected ' +
-                    '(frozen colours) — any divergence is a semantic-value flicker',
-            );
+            assert.deepEqual(semB.spans, expected, 'transition semantic tokens must equal the fully-resolved baseline reprojected ' + '(frozen colours) — any divergence is a semantic-value flicker');
         } finally {
             global.setTimeout = origSetTimeout;
             global.clearTimeout = origClearTimeout;
             delete testOverrides().rwBatch;
             for (const s of [srcA, srcB]) {
-                const key = createHash('sha1')
-                    .update(tmp)
-                    .update('\0')
-                    .update(s)
-                    .digest('hex');
+                const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
                 try {
                     unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
                 } catch {
@@ -2816,11 +2158,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const projectRoot = tmp;
 
         // Replicate diskCachePath logic: sha1(projectRoot + '\0' + sourceText)
-        const key = createHash('sha1')
-            .update(projectRoot)
-            .update('\0')
-            .update(src)
-            .digest('hex');
+        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
 
         const entry = {
@@ -2839,18 +2177,14 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
                 }),
                 getScriptFileNames: () => [fileName],
                 getScriptVersion: () => '1',
-                getScriptSnapshot: (f) =>
-                    f === fileName ? baseSnap : undefined,
+                getScriptSnapshot: (f) => (f === fileName ? baseSnap : undefined),
                 getCurrentDirectory: () => projectRoot,
                 getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
                 fileExists: (f) => f === fileName,
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const patchedHost = {
                 getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
             };
@@ -2872,11 +2206,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
             const snap = patchedHost.getScriptSnapshot(fileName);
             assert.ok(snap, 'expected a snapshot');
             const text = snap.getText(0, snap.getLength());
-            assert.equal(
-                text,
-                cachedRw,
-                'snapshot text must come from the disk cache entry',
-            );
+            assert.equal(text, cachedRw, 'snapshot text must come from the disk cache entry');
         } finally {
             try {
                 unlinkSync(cachePath);
@@ -2897,11 +2227,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const fileName = join(tmp, 'dc-corrupt.ts');
         const projectRoot = tmp;
 
-        const key = createHash('sha1')
-            .update(projectRoot)
-            .update('\0')
-            .update(src)
-            .digest('hex');
+        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
 
         // Write corrupt JSON — readDiskCache's try/catch returns null, triggering worker fallback
@@ -2916,18 +2242,14 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
                 }),
                 getScriptFileNames: () => [fileName],
                 getScriptVersion: () => '1',
-                getScriptSnapshot: (f) =>
-                    f === fileName ? baseSnap : undefined,
+                getScriptSnapshot: (f) => (f === fileName ? baseSnap : undefined),
                 getCurrentDirectory: () => projectRoot,
                 getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
                 fileExists: (f) => f === fileName,
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const patchedHost = {
                 getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
             };
@@ -2946,17 +2268,10 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
 
             // Corrupt entry → readDiskCache catch returns null → falls back to worker (fails,
             // no @sap/cds) → rewritten===src → base snapshot returned without throwing
-            assert.doesNotThrow(
-                () => patchedHost.getScriptSnapshot(fileName),
-                'corrupt cache entry must not throw',
-            );
+            assert.doesNotThrow(() => patchedHost.getScriptSnapshot(fileName), 'corrupt cache entry must not throw');
             const snap = patchedHost.getScriptSnapshot(fileName);
             const text = snap.getText(0, snap.getLength());
-            assert.equal(
-                text,
-                src,
-                'corrupt cache must be ignored, base text returned',
-            );
+            assert.equal(text, src, 'corrupt cache must be ignored, base text returned');
         } finally {
             try {
                 unlinkSync(cachePath);
@@ -2975,17 +2290,12 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const { tmpdir } = require('node:os');
         const { existsSync, unlinkSync } = require('node:fs');
 
-        const src =
-            'const r = await cds.ql`SELECT id FROM WriteCache`;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM WriteCache`;\nexport {};';
         const tmp = tmpdir();
         const fileName = join(tmp, `wdc-test-${Date.now()}.ts`);
         const projectRoot = tmp;
 
-        const key = createHash('sha1')
-            .update(projectRoot)
-            .update('\0')
-            .update(src)
-            .digest('hex');
+        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         try {
             unlinkSync(cachePath);
@@ -3026,10 +2336,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const patchedHost = {
                 getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
             };
@@ -3047,10 +2354,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
             mod.create(fakeInfo);
             patchedHost.getScriptSnapshot(fileName);
 
-            assert.ok(
-                existsSync(cachePath),
-                'writeDiskCache must have written the cache file',
-            );
+            assert.ok(existsSync(cachePath), 'writeDiskCache must have written the cache file');
         } finally {
             try {
                 unlinkSync(cachePath);
@@ -3072,11 +2376,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const tmp = tmpdir();
         const fileName = join(tmp, `dc-expired-${Date.now()}.ts`);
         const projectRoot = tmp;
-        const key = createHash('sha1')
-            .update(projectRoot)
-            .update('\0')
-            .update(src)
-            .digest('hex');
+        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
 
         // Write a valid cache entry
@@ -3108,18 +2408,14 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
                 }),
                 getScriptFileNames: () => [fileName],
                 getScriptVersion: () => '1',
-                getScriptSnapshot: (f) =>
-                    f === fileName ? baseSnap : undefined,
+                getScriptSnapshot: (f) => (f === fileName ? baseSnap : undefined),
                 getCurrentDirectory: () => projectRoot,
                 getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
                 fileExists: (f) => f === fileName,
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const patchedHost = {
                 getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
             };
@@ -3138,11 +2434,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
             // Expired cache → readDiskCache returns null → falls back to worker (no @sap/cds) → src returned
             const snap = patchedHost.getScriptSnapshot(fileName);
             const text = snap?.getText(0, snap.getLength()) ?? '';
-            assert.equal(
-                text,
-                src,
-                'expired cache must be ignored, original text must be returned',
-            );
+            assert.equal(text, src, 'expired cache must be ignored, original text must be returned');
         } finally {
             pluginOverrides.rw = savedRw;
             pluginOverrides.rwBatch = savedRwBatch;
@@ -3166,11 +2458,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const tmp = tmpdir();
         const fileName = join(tmp, `rw-cache-hit-${Date.now()}.ts`);
         const projectRoot = tmp;
-        const key = createHash('sha1')
-            .update(projectRoot)
-            .update('\0')
-            .update(src)
-            .digest('hex');
+        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         try {
             unlinkSync(cachePath);
@@ -3193,18 +2481,14 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
                 }),
                 getScriptFileNames: () => [fileName],
                 getScriptVersion: () => '1',
-                getScriptSnapshot: (f) =>
-                    f === fileName ? baseSnap : undefined,
+                getScriptSnapshot: (f) => (f === fileName ? baseSnap : undefined),
                 getCurrentDirectory: () => projectRoot,
                 getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
                 fileExists: (f) => f === fileName,
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const patchedHost = {
                 getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
             };
@@ -3223,19 +2507,11 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
             // First call: cold start — runs rewriteSnapshot, populates rewriteCache
             const snap1 = patchedHost.getScriptSnapshot(fileName);
             const text1 = snap1?.getText(0, snap1.getLength()) ?? '';
-            assert.notEqual(
-                text1,
-                src,
-                'first call must return the rewritten text',
-            );
+            assert.notEqual(text1, src, 'first call must return the rewritten text');
             // Second call: same sourceText → rewriteCache hit (b21 arm=0) — must return same rewrite
             const snap2 = patchedHost.getScriptSnapshot(fileName);
             const text2 = snap2?.getText(0, snap2.getLength()) ?? '';
-            assert.equal(
-                text2,
-                text1,
-                'cache hit must return the same rewritten text',
-            );
+            assert.equal(text2, text1, 'cache hit must return the same rewritten text');
         } finally {
             pluginOverrides.rw = origRw;
             pluginOverrides.rwBatch = origRwBatch;
@@ -3256,19 +2532,11 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const { writeFileSync, unlinkSync } = require('node:fs');
 
         const src = 'const r = await cds.ql`SELECT id FROM Books`;\nexport {};';
-        const cachedRw =
-            src.replace(
-                'cds.ql`SELECT id FROM Books`',
-                'cds.ql`` as unknown as _q0  ',
-            ) + '\ntype _q0={id:string}[];';
+        const cachedRw = src.replace('cds.ql`SELECT id FROM Books`', 'cds.ql`` as unknown as _q0  ') + '\ntype _q0={id:string}[];';
         const tmp = tmpdir();
         const fileName = join(tmp, `dc-ranges-${Date.now()}.ts`);
         const projectRoot = tmp;
-        const key = createHash('sha1')
-            .update(projectRoot)
-            .update('\0')
-            .update(src)
-            .digest('hex');
+        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
 
         // Write cache entry WITH non-empty ranges (triggers arm=0 of b25)
@@ -3288,18 +2556,14 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
                 }),
                 getScriptFileNames: () => [fileName],
                 getScriptVersion: () => '1',
-                getScriptSnapshot: (f) =>
-                    f === fileName ? baseSnap : undefined,
+                getScriptSnapshot: (f) => (f === fileName ? baseSnap : undefined),
                 getCurrentDirectory: () => projectRoot,
                 getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
                 fileExists: (f) => f === fileName,
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const patchedHost = {
                 getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
             };
@@ -3318,11 +2582,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
             // Cache hit with ranges → arm=0 fires, rewrittenRanges populated → cachedRw returned
             const snap = patchedHost.getScriptSnapshot(fileName);
             const text = snap?.getText(0, snap.getLength()) ?? '';
-            assert.equal(
-                text,
-                cachedRw,
-                'disk cache hit with ranges must return the cached rewrite',
-            );
+            assert.equal(text, cachedRw, 'disk cache hit with ranges must return the cached rewrite');
         } finally {
             try {
                 unlinkSync(cachePath);
@@ -3355,11 +2615,7 @@ describe('Plugin workers — runWorker and runBatchWorker via _testOverrides', (
         // This ensures the disk cache key is unique to this test.
         const tmp = tmpdir();
         const fileName = join(tmp, 'rw-batch-test.ts');
-        const key = createHash('sha1')
-            .update(tmp)
-            .update('\0')
-            .update(src)
-            .digest('hex');
+        const key = createHash('sha1').update(tmp).update('\0').update(src).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         try {
             unlinkSync(cachePath);
@@ -3400,10 +2656,7 @@ describe('Plugin workers — runWorker and runBatchWorker via _testOverrides', (
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const patchedHost = {
                 getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
             };
@@ -3423,10 +2676,7 @@ describe('Plugin workers — runWorker and runBatchWorker via _testOverrides', (
             const mod = pluginFactory({ typescript: TS });
             mod.create(fakeInfo);
             patchedHost.getScriptSnapshot(fileName);
-            assert.ok(
-                batchCalled,
-                'injected rwBatch must be called during snapshot rewrite',
-            );
+            assert.ok(batchCalled, 'injected rwBatch must be called during snapshot rewrite');
         } finally {
             delete overrides.rwBatch;
             try {
@@ -3446,11 +2696,7 @@ describe('Plugin workers — runWorker and runBatchWorker via _testOverrides', (
         const src = 'const r = await cds.ql`SELECT id FROM Books`;\nexport {};';
         const tmp = tmpdir();
         const fileName = join(tmp, 'rw-single-test.ts');
-        const key = createHash('sha1')
-            .update(tmp)
-            .update('\0')
-            .update(src)
-            .digest('hex');
+        const key = createHash('sha1').update(tmp).update('\0').update(src).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         try {
             unlinkSync(cachePath);
@@ -3492,10 +2738,7 @@ describe('Plugin workers — runWorker and runBatchWorker via _testOverrides', (
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const patchedHost = {
                 getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
             };
@@ -3515,16 +2758,8 @@ describe('Plugin workers — runWorker and runBatchWorker via _testOverrides', (
             const mod = pluginFactory({ typescript: TS });
             const proxy = mod.create(fakeInfo);
             patchedHost.getScriptSnapshot(fileName);
-            proxy.getCompletionsAtPosition(
-                fileName,
-                src.indexOf('id'),
-                undefined,
-                undefined,
-            );
-            assert.ok(
-                rwCalled,
-                'injected rw must be called during completions',
-            );
+            proxy.getCompletionsAtPosition(fileName, src.indexOf('id'), undefined, undefined);
+            assert.ok(rwCalled, 'injected rw must be called during completions');
         } finally {
             delete overrides.rw;
             delete overrides.rwBatch;
@@ -3556,10 +2791,7 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const patchedHost = {
             getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
         };
@@ -3620,18 +2852,9 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
         // → triggerTsServerRefresh(scriptInfo)
         proxy.getSemanticDiagnostics(fileName);
 
-        assert.ok(
-            editContentCalled,
-            'editContent must be called by triggerTsServerRefresh',
-        );
-        assert.ok(
-            updateGraphCalled,
-            'updateGraph must be called by triggerTsServerRefresh',
-        );
-        assert.ok(
-            refreshDiagCalled,
-            'refreshDiagnostics must be called by triggerTsServerRefresh',
-        );
+        assert.ok(editContentCalled, 'editContent must be called by triggerTsServerRefresh');
+        assert.ok(updateGraphCalled, 'updateGraph must be called by triggerTsServerRefresh');
+        assert.ok(refreshDiagCalled, 'refreshDiagnostics must be called by triggerTsServerRefresh');
     });
 
     it('updateGraph wrapper — patches cds.ql files discovered after create()', () => {
@@ -3655,18 +2878,14 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const patchedHost = {
             getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
         };
 
         const project = {
             projectService: { logger: NO_LOGGER },
-            getScriptInfo: (fn) =>
-                fn === fileName ? fakeScriptInfo : null,
+            getScriptInfo: (fn) => (fn === fileName ? fakeScriptInfo : null),
             updateGraph: () => {
                 origUpdateGraphCalled = true;
             },
@@ -3685,19 +2904,10 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
 
         // The wrapper replaces project.updateGraph; calling it runs the patching loop
         // then delegates to the original (captured as origUpdateGraph in the closure).
-        assert.doesNotThrow(
-            () => project.updateGraph(),
-            'wrapped updateGraph must not throw',
-        );
-        assert.ok(
-            origUpdateGraphCalled,
-            'original updateGraph must be called by the wrapper',
-        );
+        assert.doesNotThrow(() => project.updateGraph(), 'wrapped updateGraph must not throw');
+        assert.ok(origUpdateGraphCalled, 'original updateGraph must be called by the wrapper');
         // fakeScriptInfo should now be patched
-        assert.ok(
-            fakeScriptInfo.__cdsPatchedSnapshot,
-            'cds.ql file discovered via updateGraph wrapper must be patched',
-        );
+        assert.ok(fakeScriptInfo.__cdsPatchedSnapshot, 'cds.ql file discovered via updateGraph wrapper must be patched');
     });
 
     it('startup scan — patches cds.ql files present when create() runs', () => {
@@ -3720,18 +2930,14 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const patchedHost = {
             getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
         };
 
         const project = {
             projectService: { logger: NO_LOGGER },
-            getScriptInfo: (fn) =>
-                fn === fileName ? fakeScriptInfo : null,
+            getScriptInfo: (fn) => (fn === fileName ? fakeScriptInfo : null),
             updateGraph: () => {},
             getScriptFileNames: () => [fileName],
         };
@@ -3744,22 +2950,15 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
         };
 
         const mod = pluginFactory({ typescript: TS });
-        assert.doesNotThrow(
-            () => mod.create(fakeInfo),
-            'create() with startup scan must not throw',
-        );
-        assert.ok(
-            fakeScriptInfo.__cdsPatchedSnapshot,
-            'cds.ql file present at startup must be patched by startup scan',
-        );
+        assert.doesNotThrow(() => mod.create(fakeInfo), 'create() with startup scan must not throw');
+        assert.ok(fakeScriptInfo.__cdsPatchedSnapshot, 'cds.ql file present at startup must be patched by startup scan');
     });
 
     it('filterSemanticClassifications — body entered when underlying ls returns non-empty spans', () => {
         // When the LS returns spans, filterSemanticClassifications must run its filter loop.
         // With no rewritten ranges all spans pass through unchanged.
         // getEncodedSyntacticClassifications with no rewritten ranges passes through directly.
-        const src =
-            'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
         const fileName = 'fc-test.ts';
         const baseSnap = TS.ScriptSnapshot.fromString(src);
 
@@ -3774,22 +2973,18 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const realLs = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const realLs = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
 
         // Inject a synthetic span at position 0 (outside any rewritten range — must survive).
         const mockLs = Object.create(realLs);
-        mockLs.getEncodedSyntacticClassifications = (
-            _fn,
-            _span,
-        ) => ({ spans: [0, 5, 1], endOfLineState: 0 });
-        mockLs.getEncodedSemanticClassifications = (
-            _fn,
-            _span,
-            _fmt,
-        ) => ({ spans: [0, 5, 1], endOfLineState: 0 });
+        mockLs.getEncodedSyntacticClassifications = (_fn, _span) => ({
+            spans: [0, 5, 1],
+            endOfLineState: 0,
+        });
+        mockLs.getEncodedSemanticClassifications = (_fn, _span, _fmt) => ({
+            spans: [0, 5, 1],
+            endOfLineState: 0,
+        });
 
         const patchedHost = {
             getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
@@ -3809,41 +3004,15 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
         const proxy = mod.create(fakeInfo);
         const span = { start: 0, length: src.length };
 
-        assert.doesNotThrow(
-            () => proxy.getEncodedSyntacticClassifications(fileName, span),
-            'syntactic classification must not throw',
-        );
-        assert.doesNotThrow(
-            () =>
-                proxy.getEncodedSemanticClassifications(
-                    fileName,
-                    span,
-                    TS.SemanticClassificationFormat.TwentyTwenty,
-                ),
-            'filterSemanticClassifications must not throw for semantic',
-        );
+        assert.doesNotThrow(() => proxy.getEncodedSyntacticClassifications(fileName, span), 'syntactic classification must not throw');
+        assert.doesNotThrow(() => proxy.getEncodedSemanticClassifications(fileName, span, TS.SemanticClassificationFormat.TwentyTwenty), 'filterSemanticClassifications must not throw for semantic');
 
         // With no rewritten ranges (typeInference=false) all spans pass through
-        const synResult = proxy.getEncodedSyntacticClassifications(
-            fileName,
-            span,
-        );
-        assert.deepEqual(
-            synResult.spans,
-            [0, 5, 1],
-            'syntactic span at pos 0 must pass through with no ranges',
-        );
+        const synResult = proxy.getEncodedSyntacticClassifications(fileName, span);
+        assert.deepEqual(synResult.spans, [0, 5, 1], 'syntactic span at pos 0 must pass through with no ranges');
 
-        const semResult = proxy.getEncodedSemanticClassifications(
-            fileName,
-            span,
-            TS.SemanticClassificationFormat.TwentyTwenty,
-        );
-        assert.deepEqual(
-            semResult.spans,
-            [0, 5, 1],
-            'semantic span at pos 0 must pass through with no ranges',
-        );
+        const semResult = proxy.getEncodedSemanticClassifications(fileName, span, TS.SemanticClassificationFormat.TwentyTwenty);
+        assert.deepEqual(semResult.spans, [0, 5, 1], 'semantic span at pos 0 must pass through with no ranges');
     });
 
     it('projectRootFor — finds package.json walking up from repo source file', () => {
@@ -3867,10 +3036,7 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const patchedHost = {
             getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
         };
@@ -3889,10 +3055,7 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
         mod.create(fakeInfo);
         // Calling getScriptSnapshot triggers doRewrite → projectRootFor(fileName).
         // The function finds package.json at process.cwd() and caches the result.
-        assert.doesNotThrow(
-            () => patchedHost.getScriptSnapshot(fileName),
-            'projectRootFor must not throw for a real repo path',
-        );
+        assert.doesNotThrow(() => patchedHost.getScriptSnapshot(fileName), 'projectRootFor must not throw for a real repo path');
     });
 
     it('patchScriptInfoImpl getSnapshot — returns rewritten snapshot from disk cache', () => {
@@ -3904,18 +3067,13 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
         const { tmpdir } = require('node:os');
         const { writeFileSync, unlinkSync } = require('node:fs');
 
-        const src =
-            'const r = await cds.ql`SELECT id FROM SIRewrite`;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM SIRewrite`;\nexport {};';
         const cachedRw = src + '\n// si-rewrite-marker';
         const tmp = tmpdir();
         const fileName = join(tmp, 'si-rw-test.ts');
         const projectRoot = tmp;
 
-        const key = createHash('sha1')
-            .update(projectRoot)
-            .update('\0')
-            .update(src)
-            .digest('hex');
+        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         writeFileSync(
             cachePath,
@@ -3936,18 +3094,14 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
                 }),
                 getScriptFileNames: () => [fileName],
                 getScriptVersion: () => '1',
-                getScriptSnapshot: (f) =>
-                    f === fileName ? baseSnap : undefined,
+                getScriptSnapshot: (f) => (f === fileName ? baseSnap : undefined),
                 getCurrentDirectory: () => projectRoot,
                 getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
                 fileExists: (f) => f === fileName,
                 readFile: () => undefined,
                 readDirectory: () => [],
             };
-            const ls = TS.createLanguageService(
-                lsHost,
-                TS.createDocumentRegistry(),
-            );
+            const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
             const patchedHost = {
                 getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
             };
@@ -3959,8 +3113,7 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
                 languageService: ls,
                 project: {
                     projectService: { logger: NO_LOGGER },
-                    getScriptInfo: (fn) =>
-                        fn === fileName ? fakeScriptInfo : null,
+                    getScriptInfo: (fn) => (fn === fileName ? fakeScriptInfo : null),
                     updateGraph: () => {},
                 },
                 languageServiceHost: patchedHost,
@@ -3971,20 +3124,13 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
 
             // patchScriptInfoImpl is called by getSemanticDiagnostics → patchScriptInfo
             proxy.getSemanticDiagnostics(fileName);
-            assert.ok(
-                fakeScriptInfo.__cdsPatchedSnapshot,
-                'scriptInfo must be patched',
-            );
+            assert.ok(fakeScriptInfo.__cdsPatchedSnapshot, 'scriptInfo must be patched');
 
             // Now call the patched lambda — disk cache provides cachedRw != src,
             // so it hits `return ScriptSnapshot.fromString(rewritten)`
             const snap = fakeScriptInfo.getSnapshot();
             const text = snap.getText(0, snap.getLength());
-            assert.equal(
-                text,
-                cachedRw,
-                'patched scriptInfo.getSnapshot must return cached rewrite when rewritten != src',
-            );
+            assert.equal(text, cachedRw, 'patched scriptInfo.getSnapshot must return cached rewrite when rewritten != src');
         } finally {
             try {
                 unlinkSync(cachePath);
@@ -4006,8 +3152,7 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
         const { tmpdir } = require('node:os');
         const { writeFileSync, unlinkSync } = require('node:fs');
 
-        const src =
-            'const r = await cds.ql`SELECT id FROM Debounce`;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM Debounce`;\nexport {};';
         const src2 = src.replace('Debounce', 'Debounce2');
         const cachedRw = src + '\n// debounce-marker';
         const tmp = tmpdir();
@@ -4015,11 +3160,7 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
         const projectRoot = tmp;
 
         // Write cache for src (not src2) so the first call hits it
-        const key = createHash('sha1')
-            .update(projectRoot)
-            .update('\0')
-            .update(src)
-            .digest('hex');
+        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         writeFileSync(
             cachePath,
@@ -4038,20 +3179,14 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName
-                    ? TS.ScriptSnapshot.fromString(currentSrc)
-                    : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(currentSrc) : undefined),
             getCurrentDirectory: () => projectRoot,
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
 
         // Plain object — create() will replace getScriptSnapshot with its patched version
         const patchedHost = {
@@ -4092,16 +3227,10 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
             currentSrc = src2;
             patchedHost.getScriptSnapshot(fileName);
 
-            assert.ok(
-                capturedTimers.length > timersBefore,
-                'debounce timer must be scheduled',
-            );
+            assert.ok(capturedTimers.length > timersBefore, 'debounce timer must be scheduled');
 
             // Run the timer callback synchronously to exercise its body
-            assert.doesNotThrow(
-                () => capturedTimers[capturedTimers.length - 1](),
-                'debounce timer callback must not throw',
-            );
+            assert.doesNotThrow(() => capturedTimers[capturedTimers.length - 1](), 'debounce timer callback must not throw');
         } finally {
             global.setTimeout = origSetTimeout;
             try {
@@ -4134,10 +3263,7 @@ describe('index.ts — remaining annotated branches', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const patchedHost = {
             getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
         };
@@ -4154,11 +3280,7 @@ describe('index.ts — remaining annotated branches', () => {
         const mod = pluginFactory({ typescript: TS });
         mod.create(fakeInfo);
         const result = patchedHost.getScriptSnapshot('unknown-file.ts');
-        assert.equal(
-            result,
-            undefined,
-            'must return undefined when host has no snapshot',
-        );
+        assert.equal(result, undefined, 'must return undefined when host has no snapshot');
     });
 
     it('getScriptSnapshot returns base unchanged for non-JS/TS extension', () => {
@@ -4176,10 +3298,7 @@ describe('index.ts — remaining annotated branches', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const patchedHost = {
             getScriptSnapshot: (f) => lsHost.getScriptSnapshot(f),
         };
@@ -4196,11 +3315,7 @@ describe('index.ts — remaining annotated branches', () => {
         const mod = pluginFactory({ typescript: TS });
         mod.create(fakeInfo);
         const result = patchedHost.getScriptSnapshot(fileName);
-        assert.equal(
-            result,
-            jsonSnap,
-            'must return base unchanged for non-JS/TS extension',
-        );
+        assert.equal(result, jsonSnap, 'must return base unchanged for non-JS/TS extension');
     });
 
     it('getCompletionsAtPosition returns cds completions when ls returns null', () => {
@@ -4219,10 +3334,7 @@ describe('index.ts — remaining annotated branches', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const realLs = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const realLs = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const mockLs = Object.create(realLs);
         mockLs.getCompletionsAtPosition = () => undefined;
         const patchedHost = {
@@ -4248,12 +3360,7 @@ describe('index.ts — remaining annotated branches', () => {
         const proxy = mod.create(fakeInfo);
         try {
             patchedHost.getScriptSnapshot(fileName); // populates originalSource (typeInference=true)
-            const result = proxy.getCompletionsAtPosition(
-                fileName,
-                src.indexOf('id'),
-                undefined,
-                undefined,
-            );
+            const result = proxy.getCompletionsAtPosition(fileName, src.indexOf('id'), undefined, undefined);
             assert.ok(
                 result?.entries.some((e) => e.name === 'id'),
                 'cds entry must be returned when base is null',
@@ -4280,10 +3387,7 @@ describe('index.ts — remaining annotated branches', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const realLs = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const realLs = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const mockLs = Object.create(realLs);
         const fakeEntry = {
             name: 'tsBuiltin',
@@ -4319,12 +3423,7 @@ describe('index.ts — remaining annotated branches', () => {
         const proxy = mod.create(fakeInfo);
         try {
             patchedHost.getScriptSnapshot(fileName); // populates originalSource (typeInference=true)
-            const result = proxy.getCompletionsAtPosition(
-                fileName,
-                src.indexOf('id'),
-                undefined,
-                undefined,
-            );
+            const result = proxy.getCompletionsAtPosition(fileName, src.indexOf('id'), undefined, undefined);
             assert.ok(
                 result?.entries.some((e) => e.name === 'tsBuiltin'),
                 'ts builtin must survive spread',
@@ -4344,20 +3443,8 @@ describe('index.ts — remaining annotated branches', () => {
         // Position 0 is outside any template → getCqlCompletionDetails returns null.
         const src = 'const x = 1;\nexport {};';
         const { proxy } = createProxy('ced-null.ts', src, EMPTY_WORKER);
-        const result = proxy.getCompletionEntryDetails(
-            'ced-null.ts',
-            0,
-            'x',
-            undefined,
-            'cds:Svc.Entity',
-            undefined,
-            undefined,
-        );
-        assert.equal(
-            result,
-            undefined,
-            'must fall through to base when cds details returns null',
-        );
+        const result = proxy.getCompletionEntryDetails('ced-null.ts', 0, 'x', undefined, 'cds:Svc.Entity', undefined, undefined);
+        assert.equal(result, undefined, 'must fall through to base when cds details returns null');
     });
 
     it('updateGraph hook patches unpached cds.ql files added after create() (lines 442-451)', () => {
@@ -4365,8 +3452,7 @@ describe('index.ts — remaining annotated branches', () => {
         // getScriptFileNames() for unpatched files containing cds.ql and patches them.
         const { join } = require('node:path');
         const { tmpdir } = require('node:os');
-        const src =
-            'const r = await cds.ql`SELECT id FROM UGBooks`;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT id FROM UGBooks`;\nexport {};';
         const fileName = join(tmpdir(), `updateGraph-test-${Date.now()}.ts`);
         const snap = TS.ScriptSnapshot.fromString(src);
 
@@ -4401,10 +3487,7 @@ describe('index.ts — remaining annotated branches', () => {
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const fakeInfo = {
             config: { 'cds.ql.typeInference': true },
             languageService: ls,
@@ -4421,10 +3504,7 @@ describe('index.ts — remaining annotated branches', () => {
         filesVisible = true;
         project.updateGraph();
         assert.ok(updateGraphCalled, 'origUpdateGraph must be called');
-        assert.ok(
-            editContentCalled,
-            'editContent must be called to bump version (line 451)',
-        );
+        assert.ok(editContentCalled, 'editContent must be called to bump version (line 451)');
     });
 
     it('PersistentWorkerPool.call: IPC buffer too-large guard returns null (lines 182-183)', () => {
@@ -4434,22 +3514,12 @@ describe('index.ts — remaining annotated branches', () => {
         const { tmpdir } = require('node:os');
         const overrides = testOverrides();
         // Build a query string longer than IPC_BUF_SIZE (4MB) so Buffer.from(json).length + 4 > limit
-        const hugeQuery = 'SELECT id FROM Books WHERE '.padEnd(
-            4 * 1024 * 1024 + 100,
-            'x',
-        );
+        const hugeQuery = 'SELECT id FROM Books WHERE '.padEnd(4 * 1024 * 1024 + 100, 'x');
         overrides.workerPath = require.resolve('../src/cds-resolver-worker');
         try {
-            const result = overrides._runWorker(
-                [join(tmpdir(), 'no-cds'), hugeQuery, '7', ''],
-                NO_LOGGER,
-                1000,
-            );
+            const result = overrides._runWorker([join(tmpdir(), 'no-cds'), hugeQuery, '7', ''], NO_LOGGER, 1000);
             // Must return null (too-large guard) or null (worker miss) — either is acceptable
-            assert.ok(
-                result === null || result === undefined,
-                'must return null for oversized request',
-            );
+            assert.ok(result === null || result === undefined, 'must return null for oversized request');
         } finally {
             delete overrides.workerPath;
         }
@@ -4464,8 +3534,7 @@ describe('CqlTypeRewriter — annotated branches', () => {
     it('SELECT col not in field list — undefined entry is filtered out', () => {
         // Covers CqlTypeRewriter.ts:311 — fieldMap.get(field) returns undefined when
         // the SELECT column name does not match any field from the worker.
-        const src =
-            'const r = await cds.ql`SELECT ghost FROM Books                       `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT ghost FROM Books                       `;\nexport {};';
         const batchWorker = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => [
@@ -4482,30 +3551,13 @@ describe('CqlTypeRewriter — annotated branches', () => {
         });
         const originalSource = new Map();
         const rewriteCache = new Map();
-        const result = rewriteSnapshot(
-            'test.ts',
-            src,
-            TS,
-            originalSource,
-            rewriteCache,
-            EMPTY_WORKER,
-            batchWorker,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-            new Map(),
-        );
-        assert.equal(
-            typeof result,
-            'string',
-            'rewriteSnapshot must return a string',
-        );
+        const result = rewriteSnapshot('test.ts', src, TS, originalSource, rewriteCache, EMPTY_WORKER, batchWorker, NO_LOGGER, '/proj', undefined, new Map());
+        assert.equal(typeof result, 'string', 'rewriteSnapshot must return a string');
     });
 
     it('SELECT * with only Association/Composition fields — filtered to empty, no rewrite', () => {
         // Covers CqlTypeRewriter.ts:318 — fields.length === 0 after filtering → workerMiss
-        const src =
-            'const r = await cds.ql`SELECT * FROM Books                            `;\nexport {};';
+        const src = 'const r = await cds.ql`SELECT * FROM Books                            `;\nexport {};';
         const assocOnlyBatch = (_root, probes, _logger) => ({
             fields: Object.fromEntries(
                 probes.map((p) => [
@@ -4527,24 +3579,8 @@ describe('CqlTypeRewriter — annotated branches', () => {
         });
         const originalSource = new Map();
         const rewriteCache = new Map();
-        const result = rewriteSnapshot(
-            'test.ts',
-            src,
-            TS,
-            originalSource,
-            rewriteCache,
-            EMPTY_WORKER,
-            assocOnlyBatch,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-            new Map(),
-        );
-        assert.equal(
-            result,
-            src,
-            'all-association result must leave source unchanged',
-        );
+        const result = rewriteSnapshot('test.ts', src, TS, originalSource, rewriteCache, EMPTY_WORKER, assocOnlyBatch, NO_LOGGER, '/proj', undefined, new Map());
+        assert.equal(result, src, 'all-association result must leave source unchanged');
     });
 
     it('template not assigned to a variable — no VariableDeclaration ancestor, skipped', () => {
@@ -4566,24 +3602,8 @@ describe('CqlTypeRewriter — annotated branches', () => {
         });
         const originalSource = new Map();
         const rewriteCache = new Map();
-        const result = rewriteSnapshot(
-            'test.ts',
-            src,
-            TS,
-            originalSource,
-            rewriteCache,
-            EMPTY_WORKER,
-            batchWorker,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-            new Map(),
-        );
-        assert.equal(
-            result,
-            src,
-            'unassigned template must leave source unchanged',
-        );
+        const result = rewriteSnapshot('test.ts', src, TS, originalSource, rewriteCache, EMPTY_WORKER, batchWorker, NO_LOGGER, '/proj', undefined, new Map());
+        assert.equal(result, src, 'unassigned template must leave source unchanged');
     });
 
     it('jsCast does not fit in budget — else branch skipped, no rewrite', () => {
@@ -4607,24 +3627,8 @@ describe('CqlTypeRewriter — annotated branches', () => {
         });
         const originalSource = new Map();
         const rewriteCache = new Map();
-        const result = rewriteSnapshot(
-            'test.js',
-            src,
-            TS,
-            originalSource,
-            rewriteCache,
-            EMPTY_WORKER,
-            batchWorker,
-            NO_LOGGER,
-            '/proj',
-            undefined,
-            new Map(),
-        );
-        assert.equal(
-            result,
-            src,
-            'must leave source unchanged when cast does not fit budget',
-        );
+        const result = rewriteSnapshot('test.js', src, TS, originalSource, rewriteCache, EMPTY_WORKER, batchWorker, NO_LOGGER, '/proj', undefined, new Map());
+        assert.equal(result, src, 'must leave source unchanged when cast does not fit budget');
     });
 });
 
@@ -4647,9 +3651,7 @@ describe('CqlLogic — dotted entity name lookup', () => {
             ],
         });
         const { proxy } = createProxy('test.ts', src, worker);
-        assert.doesNotThrow(() =>
-            proxy.getQuickInfoAtPosition('test.ts', src.indexOf('Svc.Books')),
-        );
+        assert.doesNotThrow(() => proxy.getQuickInfoAtPosition('test.ts', src.indexOf('Svc.Books')));
     });
 });
 
@@ -4660,17 +3662,13 @@ describe('CqlLogic — dotted entity name lookup', () => {
 describe('CqlHover — non-awaited result variable hover', () => {
     it('hover on non-awaited cds.ql variable shows Promise type', () => {
         // Covers CqlHover.ts:289 — span line; displayType uses Promise<...> when awaited=false
-        const src =
-            'const r = cds.ql`SELECT * FROM Books                         `;\nconsole.log(r);\nexport {};';
+        const src = 'const r = cds.ql`SELECT * FROM Books                         `;\nconsole.log(r);\nexport {};';
         const pos = src.indexOf('console.log(r)') + 'console.log('.length;
         const { proxy } = createProxy('test.ts', src, BOOKS_WORKER);
         const info = proxy.getQuickInfoAtPosition('test.ts', pos);
         assert.ok(info, 'expected hover info on non-awaited variable');
         const text = (info.displayParts ?? []).map((p) => p.text).join('');
-        assert.ok(
-            text.includes('Promise'),
-            'non-awaited hover must show Promise<...> type, got: ' + text,
-        );
+        assert.ok(text.includes('Promise'), 'non-awaited hover must show Promise<...> type, got: ' + text);
     });
 });
 
@@ -4696,10 +3694,7 @@ describe('PersistentWorkerPool — end-to-end', () => {
     // no tsx loader, so it cannot load the .ts source — point it at the built JS.
     // (The child worker it spawns can use the .ts source via process.execPath + tsx,
     // but the bridge itself always needs dist/cds-bridge-thread.js.)
-    overrides.bridgeThreadPath = pathJoin(
-        __dirname,
-        '../src/cds-bridge-thread.js',
-    );
+    overrides.bridgeThreadPath = pathJoin(__dirname, '../src/cds-bridge-thread.js');
 
     const noLog = {
         close() {},
@@ -4728,10 +3723,7 @@ describe('PersistentWorkerPool — end-to-end', () => {
     before(() => {
         const pid = process.pid;
         mockWorkerPath = pathJoin(tmpdir(), `mock-cds-worker-${pid}.js`);
-        silentWorkerPath = pathJoin(
-            tmpdir(),
-            `silent-cds-worker-pool-${pid}.js`,
-        );
+        silentWorkerPath = pathJoin(tmpdir(), `silent-cds-worker-pool-${pid}.js`);
         noResultWorkerPath = pathJoin(tmpdir(), `no-result-worker-${pid}.js`);
         exitWorkerPath = pathJoin(tmpdir(), `exit-worker-${pid}.js`);
 
@@ -4754,13 +3746,7 @@ describe('PersistentWorkerPool — end-to-end', () => {
         );
 
         // Silent worker: reads stdin but never responds (for timeout test)
-        writeFileSync(
-            silentWorkerPath,
-            [
-                "'use strict';",
-                "require('node:readline').createInterface({ input: process.stdin }).on('line', () => {});",
-            ].join('\n'),
-        );
+        writeFileSync(silentWorkerPath, ["'use strict';", "require('node:readline').createInterface({ input: process.stdin }).on('line', () => {});"].join('\n'));
 
         // Bad-JSON worker: responds with invalid JSON (for call() catch path)
         badJsonWorkerPath = pathJoin(tmpdir(), `bad-json-worker-${pid}.js`);
@@ -4797,13 +3783,7 @@ describe('PersistentWorkerPool — end-to-end', () => {
         // then terminate the threads. Without this the orphaned child processes
         // keep their stdin pipes open and the shard worker process never exits.
         await overrides._shutdownPool();
-        for (const p of [
-            mockWorkerPath,
-            silentWorkerPath,
-            badJsonWorkerPath,
-            noResultWorkerPath,
-            exitWorkerPath,
-        ]) {
+        for (const p of [mockWorkerPath, silentWorkerPath, badJsonWorkerPath, noResultWorkerPath, exitWorkerPath]) {
             try {
                 unlinkSync(p);
             } catch {
@@ -4816,31 +3796,18 @@ describe('PersistentWorkerPool — end-to-end', () => {
         // Uses a unique projectRoot so pool spawns a fresh bridge (cold start path)
         const root = pathJoin(tmpdir(), `pool-test-single-${process.pid}`);
         overrides.workerPath = mockWorkerPath;
-        const result = overrides._runWorker(
-            [root, 'SELECT  FROM Books WHERE ', '7', ''],
-            noLog,
-        );
+        const result = overrides._runWorker([root, 'SELECT  FROM Books WHERE ', '7', ''], noLog);
         assert.ok(result, 'must return a result');
-        assert.ok(
-            Array.isArray(result.completions),
-            'must have completions array',
-        );
+        assert.ok(Array.isArray(result.completions), 'must have completions array');
     });
 
     it('runBatchWorker: batch call returns fields (getOrCreate cache hit)', () => {
         // Reuses same projectRoot as prior test → exercises getOrCreate cache-hit branch
         const root = pathJoin(tmpdir(), `pool-test-single-${process.pid}`);
         overrides.workerPath = mockWorkerPath;
-        const result = overrides._runBatchWorker(
-            root,
-            [{ entity: 'Books', prefix: '' }],
-            noLog,
-        );
+        const result = overrides._runBatchWorker(root, [{ entity: 'Books', prefix: '' }], noLog);
         assert.ok(result, 'must return a result');
-        assert.ok(
-            Array.isArray(result.fields?.Books),
-            'must have Books fields',
-        );
+        assert.ok(Array.isArray(result.fields?.Books), 'must have Books fields');
     });
 
     it('runWorker: timeout returns null when worker never responds', () => {
@@ -4855,10 +3822,7 @@ describe('PersistentWorkerPool — end-to-end', () => {
         // Inject a handle with a non-shared Int32Array so Atomics.wait throws TypeError,
         // exercising the catch block at lines 208-210 in index.ts.
         const pool = overrides._workerPool;
-        const root = pathJoin(
-            tmpdir(),
-            `pool-test-atomics-throw-${process.pid}`,
-        );
+        const root = pathJoin(tmpdir(), `pool-test-atomics-throw-${process.pid}`);
         // Use a regular ArrayBuffer (not SharedArrayBuffer) — Atomics.wait throws on it
         const badCtrl = new ArrayBuffer(12);
         const badReq = new SharedArrayBuffer(4 + 1024 * 1024);
@@ -4899,28 +3863,18 @@ describe('PersistentWorkerPool — end-to-end', () => {
         // Spawn a real bridge by calling _runWorker (getOrCreate registers thread.on('error')),
         // then emit 'error' directly on the thread to exercise lines 156-157 in index.ts.
         const pool = overrides._workerPool;
-        const root = pathJoin(
-            tmpdir(),
-            `pool-test-thread-error-real-${process.pid}`,
-        );
+        const root = pathJoin(tmpdir(), `pool-test-thread-error-real-${process.pid}`);
         const logged = [];
         const logger = { ...noLog, info: (s) => logged.push(s) };
         overrides.workerPath = mockWorkerPath;
         // This call spawns the bridge and registers the real thread.on('error') handler
-        overrides._runWorker(
-            [root, 'SELECT  FROM Books WHERE ', '7', ''],
-            logger,
-            500,
-        );
+        overrides._runWorker([root, 'SELECT  FROM Books WHERE ', '7', ''], logger, 500);
         // The bridge is now in pool.bridges — emit 'error' on the real thread
         const handle = pool.bridges.get(root);
         assert.ok(handle, 'bridge must exist after _runWorker');
         handle.thread.emit('error', new Error('simulated bridge crash'));
         // Handler logs and deletes the bridge
-        assert.ok(
-            !pool.bridges.has(root),
-            'bridge must be removed after error event',
-        );
+        assert.ok(!pool.bridges.has(root), 'bridge must be removed after error event');
         assert.ok(
             logged.some((s) => s.includes('bridge error')),
             `expected "bridge error" log, got: ${JSON.stringify(logged)}`,
@@ -4931,27 +3885,17 @@ describe('PersistentWorkerPool — end-to-end', () => {
         // The message handler only acts on msg.type === 'stderr'.
         // Sending a message with a different type must not throw or log.
         const pool = overrides._workerPool;
-        const root = pathJoin(
-            tmpdir(),
-            `pool-test-msg-non-stderr-${process.pid}`,
-        );
+        const root = pathJoin(tmpdir(), `pool-test-msg-non-stderr-${process.pid}`);
         const logged = [];
         const logger = { ...noLog, info: (s) => logged.push(s) };
         overrides.workerPath = mockWorkerPath;
-        overrides._runWorker(
-            [root, 'SELECT  FROM Books WHERE ', '7', ''],
-            logger,
-            500,
-        );
+        overrides._runWorker([root, 'SELECT  FROM Books WHERE ', '7', ''], logger, 500);
         const handle = pool.bridges.get(root);
         assert.ok(handle, 'bridge must exist');
         // Emit a message that is NOT of type 'stderr' — exercises the false branch
         handle.thread.emit('message', { type: 'other', text: 'ignored' });
         // No log entry should be added for non-stderr messages
-        assert.ok(
-            !logged.some((s) => s.includes('worker stderr')),
-            'non-stderr message must not produce a log entry',
-        );
+        assert.ok(!logged.some((s) => s.includes('worker stderr')), 'non-stderr message must not produce a log entry');
     });
 
     it('call(): catch block with non-Error thrown — String(e) path', () => {
@@ -4960,10 +3904,7 @@ describe('PersistentWorkerPool — end-to-end', () => {
         // to receive a non-Error. Achieve this by making getOrCreate throw a string by
         // temporarily patching bridges.get to throw a non-Error value.
         const pool = overrides._workerPool;
-        const root = pathJoin(
-            tmpdir(),
-            `pool-test-string-throw-${process.pid}`,
-        );
+        const root = pathJoin(tmpdir(), `pool-test-string-throw-${process.pid}`);
         const origGet = pool.bridges.get.bind(pool.bridges);
         pool.bridges.get = (k) => {
             if (k === root) throw 'string-error'; // non-Error throw
@@ -4993,34 +3934,18 @@ describe('PersistentWorkerPool — end-to-end', () => {
         overrides.workerPath = libWorkerPath;
         const logged = [];
         const logger = { ...noLog, info: (s) => logged.push(s) };
-        const result = overrides._runBatchWorker(
-            fixtureRoot,
-            [{ entity: 'Foo', prefix: '' }],
-            logger,
-        );
+        const result = overrides._runBatchWorker(fixtureRoot, [{ entity: 'Foo', prefix: '' }], logger);
         delete overrides.workerPath;
-        assert.ok(
-            result,
-            `real worker must return a result, logs: ${JSON.stringify(logged)}`,
-        );
-        assert.ok(
-            Array.isArray(result.fields?.Foo),
-            'service-scan must return fields array for Foo',
-        );
-        assert.ok(
-            result.fields.Foo.length > 0,
-            'service-scan must find at least one field',
-        );
+        assert.ok(result, `real worker must return a result, logs: ${JSON.stringify(logged)}`);
+        assert.ok(Array.isArray(result.fields?.Foo), 'service-scan must return fields array for Foo');
+        assert.ok(result.fields.Foo.length > 0, 'service-scan must find at least one field');
     });
 
     it('call(): Atomics.load(ctrlArr, 2)===1 after Atomics.wait — worker exited unexpectedly (b8 arm=0)', () => {
         // Use an exit-immediately worker so the bridge detects the child exit,
         // sets ctrl[2]=1 and notifies ctrl[1] — the main thread's Atomics.wait
         // returns 'ok' and then the fatal check fires ("exited unexpectedly").
-        const root = pathJoin(
-            tmpdir(),
-            `pool-test-fatal2-${process.pid}-${Date.now()}`,
-        );
+        const root = pathJoin(tmpdir(), `pool-test-fatal2-${process.pid}-${Date.now()}`);
         overrides.workerPath = exitWorkerPath;
         const logged = [];
         const logger = { ...noLog, info: (s) => logged.push(s) };
@@ -5028,10 +3953,7 @@ describe('PersistentWorkerPool — end-to-end', () => {
         const result = overrides._runWorker([root, 'q', '0', ''], logger, 3000);
         assert.equal(result, null, 'exited worker must return null');
         assert.ok(
-            logged.some((s) => s.includes('exited unexpectedly')) ||
-                logged.some(
-                    (s) => s.includes('timed-out') || s.includes('timed out'),
-                ),
+            logged.some((s) => s.includes('exited unexpectedly')) || logged.some((s) => s.includes('timed-out') || s.includes('timed out')),
             `expected "exited unexpectedly" or timeout, got: ${JSON.stringify(logged)}`,
         );
     });
@@ -5061,10 +3983,7 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             languageServiceHost: { getScriptSnapshot: () => undefined },
         };
         const mod = pluginFactory({ typescript: TS });
-        assert.doesNotThrow(
-            () => mod.create(fakeInfo),
-            'create() must not throw when LS has a non-function property',
-        );
+        assert.doesNotThrow(() => mod.create(fakeInfo), 'create() must not throw when LS has a non-function property');
     });
 
     it('create() with no updateGraph function skips the wrapper (b50 arm=0)', () => {
@@ -5076,18 +3995,14 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const fakeInfo = {
             config: {},
             languageService: ls,
@@ -5101,10 +4016,7 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             },
         };
         const mod = pluginFactory({ typescript: TS });
-        assert.doesNotThrow(
-            () => mod.create(fakeInfo),
-            'create() must not throw when project.updateGraph is missing',
-        );
+        assert.doesNotThrow(() => mod.create(fakeInfo), 'create() must not throw when project.updateGraph is missing');
     });
 
     it('startup scan: getScriptInfo returns null → continue (b59 arm=0)', () => {
@@ -5117,18 +4029,14 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const fakeInfo = {
             config: { 'cds.ql.typeInference': true },
             languageService: ls,
@@ -5143,10 +4051,7 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             },
         };
         const mod = pluginFactory({ typescript: TS });
-        assert.doesNotThrow(
-            () => mod.create(fakeInfo),
-            'startup scan with null ScriptInfo must not throw',
-        );
+        assert.doesNotThrow(() => mod.create(fakeInfo), 'startup scan with null ScriptInfo must not throw');
     });
 
     it('startup scan: file text has no cds.ql → condition false (b61 arm=0)', () => {
@@ -5158,18 +4063,14 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const si = {
             getSnapshot: () => TS.ScriptSnapshot.fromString(src),
             __cdsPatchedSnapshot: false,
@@ -5189,10 +4090,7 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             },
         };
         const mod = pluginFactory({ typescript: TS });
-        assert.doesNotThrow(
-            () => mod.create(fakeInfo),
-            'startup scan with non-CQL file must not throw',
-        );
+        assert.doesNotThrow(() => mod.create(fakeInfo), 'startup scan with non-CQL file must not throw');
     });
 
     it('proxy getSemanticDiagnostics: !ctx returns base when file has no CQL (b69 arm=0)', () => {
@@ -5203,18 +4101,14 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const fakeInfo = {
             config: { 'cds.ql.diagnostics': true },
             languageService: ls,
@@ -5241,18 +4135,14 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const fakeInfo = {
             config: { 'cds.ql.completion': false }, // disabled → arm=0
             languageService: ls,
@@ -5267,9 +4157,7 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
         };
         const mod = pluginFactory({ typescript: TS });
         const proxy = mod.create(fakeInfo);
-        assert.doesNotThrow(() =>
-            proxy.getCompletionsAtPosition(fileName, 10, undefined, undefined),
-        );
+        assert.doesNotThrow(() => proxy.getCompletionsAtPosition(fileName, 10, undefined, undefined));
     });
 
     it('proxy getQuickInfoAtPosition: !ctx returns base when file has no CQL (b81 arm=0)', () => {
@@ -5280,18 +4168,14 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const fakeInfo = {
             config: { 'cds.ql.hover': true },
             languageService: ls,
@@ -5318,18 +4202,14 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
             getCompilationSettings: () => ({ target: TS.ScriptTarget.ES2020 }),
             getScriptFileNames: () => [fileName],
             getScriptVersion: () => '1',
-            getScriptSnapshot: (f) =>
-                f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined,
+            getScriptSnapshot: (f) => (f === fileName ? TS.ScriptSnapshot.fromString(src) : undefined),
             getCurrentDirectory: () => '/proj',
             getDefaultLibFileName: (opts) => TS.getDefaultLibFilePath(opts),
             fileExists: (f) => f === fileName,
             readFile: () => undefined,
             readDirectory: () => [],
         };
-        const ls = TS.createLanguageService(
-            lsHost,
-            TS.createDocumentRegistry(),
-        );
+        const ls = TS.createLanguageService(lsHost, TS.createDocumentRegistry());
         const fakeInfo = {
             config: { 'cds.ql.completion': true }, // enabled so the source check runs
             languageService: ls,
@@ -5345,17 +4225,7 @@ describe('Plugin create() — proxy and startup-scan branches', () => {
         const mod = pluginFactory({ typescript: TS });
         const proxy = mod.create(fakeInfo);
         // source = 'typescript' → does not start with 'cds:' → b75 arm=0 → returns base
-        assert.doesNotThrow(() =>
-            proxy.getCompletionEntryDetails(
-                fileName,
-                6,
-                'x',
-                undefined,
-                'typescript',
-                undefined,
-                undefined,
-            ),
-        );
+        assert.doesNotThrow(() => proxy.getCompletionEntryDetails(fileName, 6, 'x', undefined, 'typescript', undefined, undefined));
     });
 });
 
@@ -5385,19 +4255,10 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         worker._testOverrides.globalRoots = () => [];
         try {
             let written = null;
-            await worker.runWorkerMain(
-                '/no-such-dir',
-                'SELECT id FROM X',
-                '0',
-                undefined,
-                (r) => {
-                    written = r;
-                },
-            );
-            assert.ok(
-                written?.error?.includes('@sap/cds'),
-                `expected @sap/cds error, got: ${written?.error}`,
-            );
+            await worker.runWorkerMain('/no-such-dir', 'SELECT id FROM X', '0', undefined, (r) => {
+                written = r;
+            });
+            assert.ok(written?.error?.includes('@sap/cds'), `expected @sap/cds error, got: ${written?.error}`);
         } finally {
             delete worker._testOverrides.globalRoots;
         }
@@ -5408,38 +4269,23 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         // but @sap/cds installed "globally". Inject a global root pointing at the
         // distributedModel fixture's node_modules (a real @sap/cds@10.x).
         const { join } = require('node:path');
-        const globalRoot = join(
-            __dirname,
-            'data/distributedModel/node_modules',
-        );
+        const globalRoot = join(__dirname, 'data/distributedModel/node_modules');
         // A bare temp dir with only a package.json and no @sap/cds — resolution
         // must fall through to the injected global root, past the "not found" gate.
         const os = require('node:os');
         const fs = require('node:fs');
         const tmp = fs.mkdtempSync(join(os.tmpdir(), 'cds-global-fallback-'));
-        fs.writeFileSync(
-            join(tmp, 'package.json'),
-            JSON.stringify({ name: 'no-cds-here' }),
-        );
+        fs.writeFileSync(join(tmp, 'package.json'), JSON.stringify({ name: 'no-cds-here' }));
         worker._testOverrides.globalRoots = () => [globalRoot];
         try {
             let written = null;
-            await worker.runWorkerMain(
-                tmp,
-                'SELECT  FROM X',
-                '0',
-                undefined,
-                (r) => {
-                    written = r;
-                },
-            );
+            await worker.runWorkerMain(tmp, 'SELECT  FROM X', '0', undefined, (r) => {
+                written = r;
+            });
             // Resolution succeeded → we are past the "@sap/cds not found" gate.
             // cds.load may still fail (the temp dir has no .cds model), but that is
             // a different, later error and proves the module was found globally.
-            assert.ok(
-                !written?.error?.includes('not found'),
-                `expected to resolve @sap/cds globally, got: ${written?.error}`,
-            );
+            assert.ok(!written?.error?.includes('not found'), `expected to resolve @sap/cds globally, got: ${written?.error}`);
         } finally {
             delete worker._testOverrides.globalRoots;
             fs.rmSync(tmp, { recursive: true, force: true });
@@ -5447,37 +4293,16 @@ describe('cds-resolver-worker — persistent handler branches', () => {
     });
 
     it('loadModel: error message lists the searched global roots when all miss', async () => {
-        worker._testOverrides.globalRoots = () => [
-            '/nonexistent-global-a',
-            '/nonexistent-global-b',
-        ];
+        worker._testOverrides.globalRoots = () => ['/nonexistent-global-a', '/nonexistent-global-b'];
         try {
             let written = null;
-            await worker.runWorkerMain(
-                '/no-such-dir',
-                'SELECT id FROM X',
-                '0',
-                undefined,
-                (r) => {
-                    written = r;
-                },
-            );
-            assert.ok(
-                written?.error?.includes('@sap/cds not found'),
-                `got: ${written?.error}`,
-            );
-            assert.ok(
-                written?.error?.includes('also searched global roots'),
-                `got: ${written?.error}`,
-            );
-            assert.ok(
-                written?.error?.includes('/nonexistent-global-a'),
-                `got: ${written?.error}`,
-            );
-            assert.ok(
-                written?.error?.includes('/nonexistent-global-b'),
-                `got: ${written?.error}`,
-            );
+            await worker.runWorkerMain('/no-such-dir', 'SELECT id FROM X', '0', undefined, (r) => {
+                written = r;
+            });
+            assert.ok(written?.error?.includes('@sap/cds not found'), `got: ${written?.error}`);
+            assert.ok(written?.error?.includes('also searched global roots'), `got: ${written?.error}`);
+            assert.ok(written?.error?.includes('/nonexistent-global-a'), `got: ${written?.error}`);
+            assert.ok(written?.error?.includes('/nonexistent-global-b'), `got: ${written?.error}`);
         } finally {
             delete worker._testOverrides.globalRoots;
         }
@@ -5492,20 +4317,11 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         worker._testOverrides.globalRoots = () => ['/nonexistent-global-only'];
         try {
             let written = null;
-            await worker.runWorkerMain(
-                localRoot,
-                'SELECT  FROM X',
-                '0',
-                undefined,
-                (r) => {
-                    written = r;
-                },
-            );
+            await worker.runWorkerMain(localRoot, 'SELECT  FROM X', '0', undefined, (r) => {
+                written = r;
+            });
             // Local resolution succeeded → never fell through to the bogus global.
-            assert.ok(
-                !written?.error?.includes('not found'),
-                `expected local @sap/cds to resolve, got: ${written?.error}`,
-            );
+            assert.ok(!written?.error?.includes('not found'), `expected local @sap/cds to resolve, got: ${written?.error}`);
         } finally {
             delete worker._testOverrides.globalRoots;
         }
@@ -5529,41 +4345,20 @@ describe('cds-resolver-worker — persistent handler branches', () => {
 
     it('runMain: --batch mode dispatches to runBatchWorkerMain', async () => {
         const out = [];
-        await worker.runMain(
-            ['node', 'worker.js', '/no-such-root', '--batch', 'not-json'],
-            makeStdin(),
-            { write: (s) => out.push(s) },
-        );
+        await worker.runMain(['node', 'worker.js', '/no-such-root', '--batch', 'not-json'], makeStdin(), { write: (s) => out.push(s) });
         assert.ok(out.length > 0, 'must write output');
         const result = JSON.parse(out[0]);
-        assert.ok(
-            result.error || result.fields !== undefined,
-            'must produce batch result or error',
-        );
+        assert.ok(result.error || result.fields !== undefined, 'must produce batch result or error');
     });
 
     it('runMain: single-query mode dispatches to runWorkerMain', async () => {
         worker._testOverrides.globalRoots = () => []; // deterministic "not found" regardless of a global @sap/cds install
         try {
             const out = [];
-            await worker.runMain(
-                [
-                    'node',
-                    'worker.js',
-                    '/no-such-root',
-                    'SELECT  FROM X',
-                    '0',
-                    '',
-                ],
-                makeStdin(),
-                { write: (s) => out.push(s) },
-            );
+            await worker.runMain(['node', 'worker.js', '/no-such-root', 'SELECT  FROM X', '0', ''], makeStdin(), { write: (s) => out.push(s) });
             assert.ok(out.length > 0, 'must write output');
             const result = JSON.parse(out[0]);
-            assert.ok(
-                result.error,
-                'must produce error when @sap/cds not found',
-            );
+            assert.ok(result.error, 'must produce error when @sap/cds not found');
         } finally {
             delete worker._testOverrides.globalRoots;
         }
@@ -5582,17 +4377,10 @@ describe('cds-resolver-worker — persistent handler branches', () => {
                 }),
                 'not-json',
             );
-            await worker.runMain(
-                ['node', 'worker.js', '/no-such-root', '--persistent'],
-                stdin,
-                { write: (s) => out.push(s) },
-            );
+            await worker.runMain(['node', 'worker.js', '/no-such-root', '--persistent'], stdin, { write: (s) => out.push(s) });
             const resp = out.find((s) => s.includes('"id":1'));
             assert.ok(resp, 'must respond to id=1');
-            assert.ok(
-                JSON.parse(resp).result?.error,
-                'must produce error result when @sap/cds not found',
-            );
+            assert.ok(JSON.parse(resp).result?.error, 'must produce error result when @sap/cds not found');
         } finally {
             delete worker._testOverrides.globalRoots;
         }
@@ -5610,17 +4398,10 @@ describe('cds-resolver-worker — persistent handler branches', () => {
                     probes: [{ entity: 'Books', prefix: '' }],
                 }),
             );
-            await worker.runMain(
-                ['node', 'worker.js', '/no-such-root', '--persistent'],
-                stdin,
-                { write: (s) => out.push(s) },
-            );
+            await worker.runMain(['node', 'worker.js', '/no-such-root', '--persistent'], stdin, { write: (s) => out.push(s) });
             const resp = out.find((s) => s.includes('"id":2'));
             assert.ok(resp, 'must respond to id=2');
-            assert.ok(
-                JSON.parse(resp).result?.error,
-                'must produce error result when @sap/cds not found',
-            );
+            assert.ok(JSON.parse(resp).result?.error, 'must produce error result when @sap/cds not found');
         } finally {
             delete worker._testOverrides.globalRoots;
         }
@@ -5634,11 +4415,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         const out = [];
 
         const pt = new PassThrough();
-        const runPromise = worker.runMain(
-            ['node', 'worker.js', fixtureRoot, '--persistent'],
-            pt,
-            { write: (s) => out.push(s) },
-        );
+        const runPromise = worker.runMain(['node', 'worker.js', fixtureRoot, '--persistent'], pt, { write: (s) => out.push(s) });
 
         // cursor >= 0 → completions path (ternary right branch, line 209)
         pt.push(
@@ -5678,11 +4455,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         const fixtureRoot = join(__dirname, 'data/distributedModel');
         const out = [];
         const pt = new PassThrough();
-        const runPromise = worker.runMain(
-            ['node', 'worker.js', fixtureRoot, '--persistent'],
-            pt,
-            { write: (s) => out.push(s) },
-        );
+        const runPromise = worker.runMain(['node', 'worker.js', fixtureRoot, '--persistent'], pt, { write: (s) => out.push(s) });
 
         // First: cold start — loads model, sets cachedDefs/cachedRoot = fixtureRoot
         pt.push(
@@ -5732,18 +4505,10 @@ describe('cds-resolver-worker — persistent handler branches', () => {
             }) + '\n',
         );
         pt.push(null);
-        await worker.runMain(
-            ['node', 'worker.js', fixtureRoot, '--persistent'],
-            pt,
-            { write: (s) => out.push(s) },
-        );
+        await worker.runMain(['node', 'worker.js', fixtureRoot, '--persistent'], pt, { write: (s) => out.push(s) });
         const resp = out.find((s) => s.includes('"id":42'));
         assert.ok(resp, 'must respond to id=42');
-        assert.deepEqual(
-            JSON.parse(resp).result.fields,
-            {},
-            'empty probes returns empty fields',
-        );
+        assert.deepEqual(JSON.parse(resp).result.fields, {}, 'empty probes returns empty fields');
     });
 
     it('runMain: --persistent single with missing cursorStr uses ?? "-1" fallback', async () => {
@@ -5762,17 +4527,10 @@ describe('cds-resolver-worker — persistent handler branches', () => {
             }) + '\n',
         );
         pt.push(null);
-        await worker.runMain(
-            ['node', 'worker.js', fixtureRoot, '--persistent'],
-            pt,
-            { write: (s) => out.push(s) },
-        );
+        await worker.runMain(['node', 'worker.js', fixtureRoot, '--persistent'], pt, { write: (s) => out.push(s) });
         const resp = out.find((s) => s.includes('"id":43'));
         assert.ok(resp, 'must respond to id=43');
-        assert.ok(
-            'diagnostics' in JSON.parse(resp).result,
-            'undefined cursorStr must produce diagnostics',
-        );
+        assert.ok('diagnostics' in JSON.parse(resp).result, 'undefined cursorStr must produce diagnostics');
     });
 
     it('runMain: --persistent watch try/catch fires when watchFn throws', async () => {
@@ -5792,11 +4550,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         );
         pt.push(null);
         // Should not throw — catch {} absorbs the error and execution continues
-        await worker.runMain(
-            ['node', 'worker.js', '/no-such-root', '--persistent'],
-            pt,
-            { write: (s) => out.push(s) },
-        );
+        await worker.runMain(['node', 'worker.js', '/no-such-root', '--persistent'], pt, { write: (s) => out.push(s) });
         assert.ok(
             out.find((s) => s.includes('"id":44')),
             'must still respond after watch throws',
@@ -5811,11 +4565,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
 
         let capturedCallback = null;
         const fakeWatcher = new EventEmitter();
-        worker._testOverrides.watch = (
-            _path,
-            _opts,
-            cb,
-        ) => {
+        worker._testOverrides.watch = (_path, _opts, cb) => {
             capturedCallback = cb;
             return fakeWatcher;
         };
@@ -5831,11 +4581,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
             }) + '\n',
         );
 
-        const runPromise = worker.runMain(
-            ['node', 'worker.js', '/no-such-root', '--persistent'],
-            pt,
-            { write: (s) => out.push(s) },
-        );
+        const runPromise = worker.runMain(['node', 'worker.js', '/no-such-root', '--persistent'], pt, { write: (s) => out.push(s) });
 
         // Let runMain reach the watch setup
         await new Promise((res) => setTimeout(res, 10));
@@ -5882,11 +4628,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
             }) + '\n',
         );
 
-        const runPromise = worker.runMain(
-            ['node', 'worker.js', '/no-such-root', '--persistent'],
-            pt,
-            { write: (s) => out.push(s) },
-        );
+        const runPromise = worker.runMain(['node', 'worker.js', '/no-such-root', '--persistent'], pt, { write: (s) => out.push(s) });
         await new Promise((res) => setTimeout(res, 10));
 
         // Emit error on the watcher — the handler ignores it, runMain continues
@@ -5911,18 +4653,11 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         const out = [];
         // 'Foo' is unqualified and has no direct match — triggers service-scan (lines 46-49)
         // The fixture's service.cds exposes FooService.Foo so the scan finds candidates.
-        await worker.runBatchWorkerMain(
-            fixtureRoot,
-            JSON.stringify([{ entity: 'Foo', prefix: '' }]),
-            (r) => out.push(JSON.stringify(r)),
-        );
+        await worker.runBatchWorkerMain(fixtureRoot, JSON.stringify([{ entity: 'Foo', prefix: '' }]), (r) => out.push(JSON.stringify(r)));
         assert.ok(out.length > 0, 'must produce output');
         const result = JSON.parse(out[0]);
         assert.ok('fields' in result, 'must produce fields');
-        assert.ok(
-            result.fields['Foo'].length > 0,
-            'service-scan must find fields for Foo',
-        );
+        assert.ok(result.fields['Foo'].length > 0, 'service-scan must find fields for Foo');
     });
 
     it('runBatchWorkerMain: probeEntityFields first-filter predicate fires (line 44)', async () => {
@@ -5932,18 +4667,11 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         const { join } = require('node:path');
         const fixtureRoot = join(__dirname, 'data/distributedModel');
         const out = [];
-        await worker.runBatchWorkerMain(
-            fixtureRoot,
-            JSON.stringify([{ entity: 'FooService.Foo', prefix: '' }]),
-            (r) => out.push(JSON.stringify(r)),
-        );
+        await worker.runBatchWorkerMain(fixtureRoot, JSON.stringify([{ entity: 'FooService.Foo', prefix: '' }]), (r) => out.push(JSON.stringify(r)));
         assert.ok(out.length > 0, 'must produce output');
         const result = JSON.parse(out[0]);
         assert.ok('fields' in result, 'must produce fields');
-        assert.ok(
-            result.fields['FooService.Foo'].length > 0,
-            'fully-qualified entity must return fields directly',
-        );
+        assert.ok(result.fields['FooService.Foo'].length > 0, 'fully-qualified entity must return fields directly');
     });
 
     it('loadModel: cds.load throws — catch returns error object', async () => {
@@ -5956,10 +4684,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         const tmp = join(tmpdir(), `cds-loadfail-${process.pid}`);
         const cdsDir = join(tmp, 'node_modules', '@sap', 'cds');
         mkdirSync(cdsDir, { recursive: true });
-        writeFileSync(
-            join(tmp, 'package.json'),
-            JSON.stringify({ name: 'test', version: '1.0.0' }),
-        );
+        writeFileSync(join(tmp, 'package.json'), JSON.stringify({ name: 'test', version: '1.0.0' }));
         writeFileSync(
             join(cdsDir, 'package.json'),
             JSON.stringify({
@@ -5976,19 +4701,10 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         );
         try {
             let written = null;
-            await worker.runWorkerMain(
-                tmp,
-                'SELECT id FROM X',
-                '0',
-                undefined,
-                (r) => {
-                    written = r;
-                },
-            );
-            assert.ok(
-                written?.error?.includes('cds.load failed'),
-                `expected cds.load error, got: ${written?.error}`,
-            );
+            await worker.runWorkerMain(tmp, 'SELECT id FROM X', '0', undefined, (r) => {
+                written = r;
+            });
+            assert.ok(written?.error?.includes('cds.load failed'), `expected cds.load error, got: ${written?.error}`);
         } finally {
             rmSync(tmp, { recursive: true, force: true });
         }
@@ -6004,10 +4720,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         const tmp = join(tmpdir(), `cds-batchcatch-${process.pid}`);
         const cdsDir = join(tmp, 'node_modules', '@sap', 'cds');
         mkdirSync(cdsDir, { recursive: true });
-        writeFileSync(
-            join(tmp, 'package.json'),
-            JSON.stringify({ name: 'test', version: '1.0.0' }),
-        );
+        writeFileSync(join(tmp, 'package.json'), JSON.stringify({ name: 'test', version: '1.0.0' }));
         writeFileSync(
             join(cdsDir, 'package.json'),
             JSON.stringify({
@@ -6034,16 +4747,9 @@ describe('cds-resolver-worker — persistent handler branches', () => {
             },
         };
         try {
-            await worker.runMain(
-                ['node', 'w', tmp, '--batch', JSON.stringify([])],
-                makeStdin(),
-                throwingStdout,
-            );
+            await worker.runMain(['node', 'w', tmp, '--batch', JSON.stringify([])], makeStdin(), throwingStdout);
             // The .catch writes the error — it calls write again (calls === 2)
-            assert.ok(
-                out.length > 0 || calls >= 1,
-                '.catch path must be reached',
-            );
+            assert.ok(out.length > 0 || calls >= 1, '.catch path must be reached');
         } finally {
             rmSync(tmp, { recursive: true, force: true });
         }
@@ -6058,10 +4764,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
         const tmp = join(tmpdir(), `cds-singlecatch-${process.pid}`);
         const cdsDir = join(tmp, 'node_modules', '@sap', 'cds');
         mkdirSync(cdsDir, { recursive: true });
-        writeFileSync(
-            join(tmp, 'package.json'),
-            JSON.stringify({ name: 'test', version: '1.0.0' }),
-        );
+        writeFileSync(join(tmp, 'package.json'), JSON.stringify({ name: 'test', version: '1.0.0' }));
         writeFileSync(
             join(cdsDir, 'package.json'),
             JSON.stringify({
@@ -6086,11 +4789,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
             },
         };
         try {
-            await worker.runMain(
-                ['node', 'w', tmp, 'SELECT id FROM X', '0', ''],
-                makeStdin(),
-                throwingStdout,
-            );
+            await worker.runMain(['node', 'w', tmp, 'SELECT id FROM X', '0', ''], makeStdin(), throwingStdout);
             assert.ok(calls >= 1, '.catch path must be reached');
         } finally {
             rmSync(tmp, { recursive: true, force: true });
@@ -6104,11 +4803,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
 
         let capturedCallback = null;
         const fakeWatcher = new EventEmitter();
-        worker._testOverrides.watch = (
-            _path,
-            _opts,
-            cb,
-        ) => {
+        worker._testOverrides.watch = (_path, _opts, cb) => {
             capturedCallback = cb;
             return fakeWatcher;
         };
@@ -6124,11 +4819,7 @@ describe('cds-resolver-worker — persistent handler branches', () => {
             }) + '\n',
         );
 
-        const runPromise = worker.runMain(
-            ['node', 'worker.js', '/no-such-root', '--persistent'],
-            pt,
-            { write: (s) => out.push(s) },
-        );
+        const runPromise = worker.runMain(['node', 'worker.js', '/no-such-root', '--persistent'], pt, { write: (s) => out.push(s) });
         await new Promise((res) => setTimeout(res, 10));
 
         assert.ok(capturedCallback, 'watch must have been called');
@@ -6164,17 +4855,10 @@ describe('cds-resolver-worker — persistent handler branches', () => {
             }) + '\n',
         );
         pt.push(null);
-        await worker.runMain(
-            ['node', 'worker.js', fixtureRoot, '--persistent'],
-            pt,
-            { write: (s) => out.push(s) },
-        );
+        await worker.runMain(['node', 'worker.js', fixtureRoot, '--persistent'], pt, { write: (s) => out.push(s) });
         const resp = out.find((s) => s.includes('"id":60'));
         assert.ok(resp, `must respond to id=60, got: ${JSON.stringify(out)}`);
-        assert.ok(
-            'diagnostics' in JSON.parse(resp).result,
-            'empty query must yield diagnostics result',
-        );
+        assert.ok('diagnostics' in JSON.parse(resp).result, 'empty query must yield diagnostics result');
     });
 
     it('runMain: --persistent single with undefined query on completions path exercises query ?? "" (line 209)', async () => {
@@ -6196,16 +4880,9 @@ describe('cds-resolver-worker — persistent handler branches', () => {
             }) + '\n',
         );
         pt.push(null);
-        await worker.runMain(
-            ['node', 'worker.js', fixtureRoot, '--persistent'],
-            pt,
-            { write: (s) => out.push(s) },
-        );
+        await worker.runMain(['node', 'worker.js', fixtureRoot, '--persistent'], pt, { write: (s) => out.push(s) });
         const resp = out.find((s) => s.includes('"id":61'));
         assert.ok(resp, `must respond to id=61, got: ${JSON.stringify(out)}`);
-        assert.ok(
-            'completions' in JSON.parse(resp).result,
-            'null query on completions path must yield completions',
-        );
+        assert.ok('completions' in JSON.parse(resp).result, 'null query on completions path must yield completions');
     });
 });

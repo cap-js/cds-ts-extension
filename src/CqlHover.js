@@ -3,28 +3,11 @@
 /** @typedef {import('typescript/lib/tsserverlibrary')} TS */
 
 /** @typedef {import('./CqlLogic').CompletionEntry} CompletionEntry */
-const {
-    cdsTypeToTs,
-    CQL_KEYWORDS,
-    extractSourceRelations,
-    getTokenContext,
-    tokenizeCql,
-} = require('./CqlLogic');
-const {
-    extractTemplateText,
-    findCdsQueryTemplate,
-    offsetInTemplate,
-    resolveRowTypeBody,
-    resolveToCdsQuery,
-} = require('./CqlTypeRewriter');
+const { cdsTypeToTs, CQL_KEYWORDS, extractSourceRelations, getTokenContext, tokenizeCql } = require('./CqlLogic');
+const { extractTemplateText, findCdsQueryTemplate, offsetInTemplate, resolveRowTypeBody, resolveToCdsQuery } = require('./CqlTypeRewriter');
 /** @typedef {import('./CqlTypeRewriter').CqlTemplateRef} CqlTemplateRef */
 const { parseCqlColumns } = require('./CqlLogic');
-const {
-    isCdsQueryTag,
-    isScopeBoundary,
-    isNamedVarDecl,
-    unwrapAwait,
-} = require('./TsAstHelpers');
+const { isCdsQueryTag, isScopeBoundary, isNamedVarDecl, unwrapAwait } = require('./TsAstHelpers');
 const { serviceAnnotationFor } = require('./ServiceAnnotation');
 /** @typedef {import('./QueryContext').QueryContext} QueryContext */
 
@@ -41,11 +24,7 @@ const { serviceAnnotationFor } = require('./ServiceAnnotation');
  * @param {{ leadingConst?: boolean }} [opts]
  * @returns {import('typescript').SymbolDisplayPart[]}
  */
-function fieldDisplayParts(
-    name,
-    tsType,
-    opts,
-) {
+function fieldDisplayParts(name, tsType, opts) {
     const head = opts?.leadingConst
         ? [
               { kind: 'keyword', text: 'const' },
@@ -57,13 +36,7 @@ function fieldDisplayParts(
               { kind: 'punctuation', text: ')' },
               { kind: 'space', text: ' ' },
           ];
-    return [
-        ...head,
-        { kind: 'propertyName', text: name },
-        { kind: 'punctuation', text: ':' },
-        { kind: 'space', text: ' ' },
-        { kind: 'keyword', text: tsType },
-    ];
+    return [...head, { kind: 'propertyName', text: name }, { kind: 'punctuation', text: ':' }, { kind: 'space', text: ' ' }, { kind: 'keyword', text: tsType }];
 }
 
 /**
@@ -78,38 +51,21 @@ function fieldDisplayParts(
  * @param {QueryContext['logger']} logger
  * @returns {Map<string, CompletionEntry>}
  */
-function buildFieldMap(
-    template,
-    typescript,
-    origText,
-    origSf,
-    projectRoot,
-    runWorker,
-    logger,
-) {
+function buildFieldMap(template, typescript, origText, origSf, projectRoot, runWorker, logger) {
     const queryText = extractTemplateText(typescript, template);
     const prefix = serviceAnnotationFor(typescript, origText, template, origSf);
-    const significant = tokenizeCql(queryText).filter(
-        (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
-    );
+    const significant = tokenizeCql(queryText).filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
     const sources = extractSourceRelations(significant);
     const parsedCols = parseCqlColumns(queryText);
     // Flatten top-level columns only (expand sub-cols are nested; hover shows top-level shape)
-    const selectedCols =
-        parsedCols === null
-            ? null
-            : parsedCols.map((c) => ({ field: c.field, alias: c.alias }));
+    const selectedCols = parsedCols === null ? null : parsedCols.map((c) => ({ field: c.field, alias: c.alias }));
     const rawMap = new Map();
 
     for (const { entity } of sources) {
         const probePrefix = entity.includes('.') ? '' : (prefix ?? '');
         const probeQuery = `SELECT  FROM ${entity} WHERE `;
-        const r = runWorker(
-            [projectRoot, probeQuery, String(probeQuery.length), probePrefix],
-            logger,
-        );
-        for (const f of r?.completions?.filter((c) => c.kind === 'field') ??
-            []) {
+        const r = runWorker([projectRoot, probeQuery, String(probeQuery.length), probePrefix], logger);
+        for (const f of r?.completions?.filter((c) => c.kind === 'field') ?? []) {
             if (!rawMap.has(f.label)) rawMap.set(f.label, f);
         }
     }
@@ -141,25 +97,10 @@ function buildFieldMap(
  * @param {QueryContext['logger']} logger
  * @returns {string | null}
  */
-function buildHoverRowBody(
-    template,
-    typescript,
-    origText,
-    origSf,
-    projectRoot,
-    runBatchWorker,
-    logger,
-) {
+function buildHoverRowBody(template, typescript, origText, origSf, projectRoot, runBatchWorker, logger) {
     const queryText = extractTemplateText(typescript, template);
     const prefix = serviceAnnotationFor(typescript, origText, template, origSf);
-    return resolveRowTypeBody(
-        typescript,
-        queryText,
-        prefix ?? undefined,
-        projectRoot,
-        runBatchWorker,
-        logger,
-    );
+    return resolveRowTypeBody(typescript, queryText, prefix ?? undefined, projectRoot, runBatchWorker, logger);
 }
 
 /** Walk up from a node to find the first VariableDeclaration whose initializer
@@ -171,23 +112,12 @@ function buildHoverRowBody(
  * @param {import('typescript').SourceFile} origSf
  * @returns {CqlTemplateRef | null}
  */
-function findCqlSourceDecl(
-    node,
-    typescript,
-    origSf,
-) {
+function findCqlSourceDecl(node, typescript, origSf) {
     let cur = node;
     while (cur && cur.kind !== typescript.SyntaxKind.SourceFile) {
         if (typescript.isVariableDeclaration(cur) && cur.initializer) {
-            const { expr: init, awaited } = unwrapAwait(
-                typescript,
-                cur.initializer,
-            );
-            if (
-                typescript.isTaggedTemplateExpression(init) &&
-                isCdsQueryTag(typescript, init.tag)
-            )
-                return { template: init, awaited };
+            const { expr: init, awaited } = unwrapAwait(typescript, cur.initializer);
+            if (typescript.isTaggedTemplateExpression(init) && isCdsQueryTag(typescript, init.tag)) return { template: init, awaited };
 
             // Initializer is an identifier — follow it to its own cds.ql assignment
             if (typescript.isIdentifier(init)) {
@@ -198,18 +128,10 @@ function findCqlSourceDecl(
                 const scan = (/** @type {import('typescript').Node} */ n) => {
                     if (found) return;
                     if (isNamedVarDecl(typescript, n) && n.name.text === name) {
-                        const { expr: iinit, awaited: iawaited } = unwrapAwait(
-                            typescript,
-                            n.initializer,
-                        );
-                        if (
-                            typescript.isTaggedTemplateExpression(iinit) &&
-                            isCdsQueryTag(typescript, iinit.tag)
-                        )
-                            found = { template: iinit, awaited: iawaited };
+                        const { expr: iinit, awaited: iawaited } = unwrapAwait(typescript, n.initializer);
+                        if (typescript.isTaggedTemplateExpression(iinit) && isCdsQueryTag(typescript, iinit.tag)) found = { template: iinit, awaited: iawaited };
                     }
-                    if (!isScopeBoundary(typescript, n) || n === scope)
-                        typescript.forEachChild(n, scan);
+                    if (!isScopeBoundary(typescript, n) || n === scope) typescript.forEachChild(n, scan);
                 };
                 scan(scope);
                 if (found) return found;
@@ -227,11 +149,7 @@ function findCqlSourceDecl(
  * @param {import('typescript').SourceFile} root
  * @returns {import('typescript').Node}
  */
-function findAncestorScope(
-    node,
-    typescript,
-    root,
-) {
+function findAncestorScope(node, typescript, root) {
     let cur = node.parent;
     while (cur && cur !== root) {
         if (isScopeBoundary(typescript, cur)) return cur;
@@ -247,12 +165,7 @@ function findAncestorScope(
  * @param {TS} typescript
  * @returns {import('typescript').QuickInfo | null}
  */
-function getCqlHover(
-    fileName,
-    position,
-    ctx,
-    typescript,
-) {
+function getCqlHover(fileName, position, ctx, typescript) {
     const { origText, origSf, projectRoot, runWorker } = ctx;
 
     // ── Case 1: cursor is directly inside a cds.ql template literal ──
@@ -260,39 +173,16 @@ function getCqlHover(
     if (template) {
         const queryText = extractTemplateText(typescript, template);
         const cursorOff = offsetInTemplate(typescript, template, position);
-        const prefix = serviceAnnotationFor(
-            typescript,
-            origText,
-            template,
-            origSf,
-        );
-        const tokenCtx = getTokenContext(
-            queryText,
-            cursorOff,
-            {},
-            prefix ?? undefined,
-        );
+        const prefix = serviceAnnotationFor(typescript, origText, template, origSf);
+        const tokenCtx = getTokenContext(queryText, cursorOff, {}, prefix ?? undefined);
 
         if (tokenCtx?.kind === 'entity') {
             const probeQuery = `SELECT  FROM ${tokenCtx.token.value} WHERE `;
-            const probePrefix = tokenCtx.token.value.includes('.')
-                ? ''
-                : (prefix ?? '');
-            const result = runWorker(
-                [
-                    projectRoot,
-                    probeQuery,
-                    String(probeQuery.length),
-                    probePrefix,
-                ],
-                ctx.logger,
-            );
-            const anyField = result?.completions?.find(
-                (c) => c.kind === 'field',
-            );
+            const probePrefix = tokenCtx.token.value.includes('.') ? '' : (prefix ?? '');
+            const result = runWorker([projectRoot, probeQuery, String(probeQuery.length), probePrefix], ctx.logger);
+            const anyField = result?.completions?.find((c) => c.kind === 'field');
             const fqn = anyField?.entity ?? tokenCtx.token.value;
-            const tokenStart =
-                template.template.getStart(origSf) + 1 + tokenCtx.token.start;
+            const tokenStart = template.template.getStart(origSf) + 1 + tokenCtx.token.start;
             return {
                 kind: typescript.ScriptElementKind.classElement,
                 kindModifiers: '',
@@ -311,21 +201,11 @@ function getCqlHover(
             };
         }
 
-        if (
-            tokenCtx?.kind === 'field' &&
-            !CQL_KEYWORDS.has(tokenCtx.token.value.toUpperCase())
-        ) {
-            const probeQuery = queryText.trimStart().startsWith('SELECT')
-                ? queryText
-                : `SELECT  FROM ${queryText.match(/FROM\s+(\S+)/i)?.[1] ?? ''} WHERE `;
+        if (tokenCtx?.kind === 'field' && !CQL_KEYWORDS.has(tokenCtx.token.value.toUpperCase())) {
+            const probeQuery = queryText.trimStart().startsWith('SELECT') ? queryText : `SELECT  FROM ${queryText.match(/FROM\s+(\S+)/i)?.[1] ?? ''} WHERE `;
             const probeOff = probeQuery.toUpperCase().indexOf('SELECT') + 7;
-            const result = runWorker(
-                [projectRoot, probeQuery, String(probeOff), prefix ?? ''],
-                ctx.logger,
-            );
-            const field = result?.completions?.find(
-                (c) => c.kind === 'field' && c.label === tokenCtx.token.value,
-            );
+            const result = runWorker([projectRoot, probeQuery, String(probeOff), prefix ?? ''], ctx.logger);
+            const field = result?.completions?.find((c) => c.kind === 'field' && c.label === tokenCtx.token.value);
             if (field) {
                 const tsType = cdsTypeToTs(field.detail);
                 const parts = fieldDisplayParts(tokenCtx.token.value, tsType);
@@ -346,10 +226,7 @@ function getCqlHover(
                     if (docs.length) docs.push({ kind: 'text', text: '\n\n' });
                     docs.push({ kind: 'text', text: field.doc });
                 }
-                const tokenStart =
-                    template.template.getStart(origSf) +
-                    1 +
-                    tokenCtx.token.start;
+                const tokenStart = template.template.getStart(origSf) + 1 + tokenCtx.token.start;
                 return {
                     kind: typescript.ScriptElementKind.memberVariableElement,
                     kindModifiers: '',
@@ -368,10 +245,7 @@ function getCqlHover(
 
     // Find the leaf AST node at the cursor position
     /** @type {(n: import('typescript').Node) => import('typescript').Node | null} */
-    const findNodeAt = (n) =>
-        n.pos <= position && position <= n.end
-            ? (typescript.forEachChild(n, findNodeAt) ?? n)
-            : null;
+    const findNodeAt = (n) => (n.pos <= position && position <= n.end ? (typescript.forEachChild(n, findNodeAt) ?? n) : null);
     const leafNode = findNodeAt(origSf);
 
     // ── Case 2: cursor is on a property access chain rooted at a cds.ql variable ──
@@ -382,22 +256,13 @@ function getCqlHover(
         // QuestionDotToken (?.) immediately before it (they share the same start offset).
         let propName = null;
         let propSpan = null;
-        if (
-            typescript.isIdentifier(leafNode) &&
-            leafNode.parent &&
-            typescript.isPropertyAccessExpression(leafNode.parent) &&
-            leafNode.parent.name === leafNode
-        ) {
+        if (typescript.isIdentifier(leafNode) && leafNode.parent && typescript.isPropertyAccessExpression(leafNode.parent) && leafNode.parent.name === leafNode) {
             propName = leafNode.text;
             propSpan = {
                 start: leafNode.getStart(origSf),
                 length: leafNode.getWidth(origSf),
             };
-        } else if (
-            leafNode.kind === typescript.SyntaxKind.QuestionDotToken &&
-            leafNode.parent &&
-            typescript.isPropertyAccessExpression(leafNode.parent)
-        ) {
+        } else if (leafNode.kind === typescript.SyntaxKind.QuestionDotToken && leafNode.parent && typescript.isPropertyAccessExpression(leafNode.parent)) {
             // Cursor is on ?.  — treat as hover on the property name that follows
             const pae = leafNode.parent;
             propName = pae.name.text;
@@ -410,21 +275,12 @@ function getCqlHover(
         if (propName && propSpan) {
             const resolved = resolveToCdsQuery(typescript, origSf, position);
             if (resolved) {
-                const fieldMap = buildFieldMap(
-                    resolved.template,
-                    typescript,
-                    origText,
-                    origSf,
-                    projectRoot,
-                    runWorker,
-                    ctx.logger,
-                );
+                const fieldMap = buildFieldMap(resolved.template, typescript, origText, origSf, projectRoot, runWorker, ctx.logger);
                 const fieldEntry = fieldMap.get(propName);
                 if (fieldEntry) {
                     const tsType = cdsTypeToTs(fieldEntry.detail);
                     return {
-                        kind: typescript.ScriptElementKind
-                            .memberVariableElement,
+                        kind: typescript.ScriptElementKind.memberVariableElement,
                         kindModifiers: '',
                         textSpan: propSpan,
                         displayParts: fieldDisplayParts(propName, tsType),
@@ -438,20 +294,9 @@ function getCqlHover(
         if (typescript.isIdentifier(leafNode)) {
             const resolved = resolveToCdsQuery(typescript, origSf, position);
             if (resolved) {
-                const rowBody = buildHoverRowBody(
-                    resolved.template,
-                    typescript,
-                    origText,
-                    origSf,
-                    projectRoot,
-                    ctx.runBatchWorker,
-                    ctx.logger,
-                );
-                const typeStr =
-                    rowBody === null ? 'unknown' : `{ ${rowBody} }[]`;
-                const displayType = resolved.awaited
-                    ? typeStr
-                    : `Promise<${typeStr}>`;
+                const rowBody = buildHoverRowBody(resolved.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger);
+                const typeStr = rowBody === null ? 'unknown' : `{ ${rowBody} }[]`;
+                const displayType = resolved.awaited ? typeStr : `Promise<${typeStr}>`;
                 const span = {
                     start: leafNode.getStart(origSf),
                     length: leafNode.getWidth(origSf),
@@ -479,56 +324,30 @@ function getCqlHover(
             if (typescript.isObjectBindingPattern(cur)) {
                 isNestedObjectField = true;
             }
-            if (
-                typescript.isVariableDeclaration(cur) &&
-                typescript.isArrayBindingPattern(cur.name) &&
-                cur.initializer
-            ) {
+            if (typescript.isVariableDeclaration(cur) && typescript.isArrayBindingPattern(cur.name) && cur.initializer) {
                 const source = findCqlSourceDecl(cur, typescript, origSf);
                 if (source) {
                     if (isNestedObjectField) {
                         // const [{ID}] = ... → show type of the specific field
-                        const fieldMap = buildFieldMap(
-                            source.template,
-                            typescript,
-                            origText,
-                            origSf,
-                            projectRoot,
-                            runWorker,
-                            ctx.logger,
-                        );
+                        const fieldMap = buildFieldMap(source.template, typescript, origText, origSf, projectRoot, runWorker, ctx.logger);
                         const fieldEntry = fieldMap.get(leafNode.text);
                         if (fieldEntry) {
                             const tsType = cdsTypeToTs(fieldEntry.detail);
                             return {
-                                kind: typescript.ScriptElementKind
-                                    .memberVariableElement,
+                                kind: typescript.ScriptElementKind.memberVariableElement,
                                 kindModifiers: '',
                                 textSpan: {
                                     start: leafNode.getStart(origSf),
                                     length: leafNode.getWidth(origSf),
                                 },
-                                displayParts: fieldDisplayParts(
-                                    leafNode.text,
-                                    tsType,
-                                    { leadingConst: true },
-                                ),
+                                displayParts: fieldDisplayParts(leafNode.text, tsType, { leadingConst: true }),
                                 documentation: [],
                             };
                         }
                     } else {
                         // const [fst] = ... or const [r1] = result → show row type
-                        const rowBody = buildHoverRowBody(
-                            source.template,
-                            typescript,
-                            origText,
-                            origSf,
-                            projectRoot,
-                            ctx.runBatchWorker,
-                            ctx.logger,
-                        );
-                        const rowType =
-                            rowBody === null ? 'unknown' : `{ ${rowBody} }`;
+                        const rowBody = buildHoverRowBody(source.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger);
+                        const rowType = rowBody === null ? 'unknown' : `{ ${rowBody} }`;
                         return {
                             kind: typescript.ScriptElementKind.variableElement,
                             kindModifiers: '',
