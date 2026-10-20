@@ -1317,7 +1317,7 @@ describe('cds-resolver-worker — subprocess invocation', () => {
     const { spawnSync } = require('node:child_process');
     const { join } = require('node:path');
 
-    const workerSrc = join(__dirname, '../src/cds-resolver-worker.ts');
+    const workerSrc = join(__dirname, '../src/cds-resolver-worker.js');
     const projectRoot = join(__dirname, '..'); // repo root has @sap/cds in node_modules
 
     function callWorker(...args) {
@@ -1325,7 +1325,7 @@ describe('cds-resolver-worker — subprocess invocation', () => {
     }
 
     function callWorkerEnv(extraEnv, ...args) {
-        const result = spawnSync(process.execPath, ['-r', 'tsx/cjs', workerSrc, ...args], {
+        const result = spawnSync(process.execPath, [workerSrc, ...args], {
             encoding: 'utf8',
             timeout: 15000,
             env: { ...process.env, ...extraEnv },
@@ -1371,7 +1371,7 @@ describe('cds-resolver-worker — subprocess invocation', () => {
         // Covers the require.main --persistent branch: spawn the worker with --persistent,
         // write a JSON request, read the response, kill the process.
         const { spawn } = require('node:child_process');
-        const proc = spawn(process.execPath, ['-r', 'tsx/cjs', workerSrc, projectRoot, '--persistent'], {
+        const proc = spawn(process.execPath, [workerSrc, projectRoot, '--persistent'], {
             stdio: ['pipe', 'pipe', 'inherit'],
         });
 
@@ -1406,7 +1406,7 @@ describe('cds-resolver-worker — subprocess invocation', () => {
     it('--persistent mode: handles invalid JSON line gracefully', async () => {
         // Covers the try/catch around JSON.parse in the readline handler
         const { spawn } = require('node:child_process');
-        const proc = spawn(process.execPath, ['-r', 'tsx/cjs', workerSrc, projectRoot, '--persistent'], {
+        const proc = spawn(process.execPath, [workerSrc, projectRoot, '--persistent'], {
             stdio: ['pipe', 'pipe', 'inherit'],
         });
 
