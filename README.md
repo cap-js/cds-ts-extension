@@ -8,6 +8,8 @@ It runs inside the TypeScript server process. After registration it has no depen
 on the CDS Language Server — it resolves `@sap/cds` directly from the user's project
 (with a global-install fallback) via a child-process worker.
 
+> **Note:** This project is in an early stage (v0.0.1) and is not yet ready for productive use.
+
 > The full design documentation — features, the snapshot-rewriting invariants,
 > configuration, diagnostic codes, and the worker protocol — lives in
 > [`DEVELOPMENT.md`](./DEVELOPMENT.md).
@@ -86,10 +88,29 @@ And enable features in `.vscode/settings.json`:
 
 ## Requirements
 
-- Node.js >= 24 (native test runner with coverage thresholds).
+To **use** the plugin (via `vscode-cds`):
+
+- [VS Code](https://code.visualstudio.com/) with the [SAP CDS Language Support](https://marketplace.visualstudio.com/items?itemName=SAPSE.vscode-cds) extension installed.
+- A [CAP](https://cap.cloud.sap/) project with [`@sap/cds`](https://www.npmjs.com/package/@sap/cds) installed.
+
+To **develop** the plugin:
+
+- [Node.js](https://nodejs.org/) >= 24 (required for the native test runner with coverage thresholds).
 - `@sap/cds` is a devDependency so the worker/model-loading tests can load a real model.
 
 ## Coverage thresholds
 
 Enforced via the native test runner (`--test-coverage-*`): lines 98%, functions 96.7%,
 branches 92%.
+
+## Contributing
+
+Please refer to our [CONTRIBUTING.md](./CONTRIBUTING.md) for details on how to contribute, report issues, and the DCO process.
+
+## Code of Conduct
+
+We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone. By participating in this project, you agree to abide by its [Code of Conduct](https://github.com/cap-js/.github/blob/main/CODE_OF_CONDUCT.md) at all times.
+
+## Licensing
+
+Copyright 2025 SAP SE or an SAP affiliate company and `@cap-js/cds-ts-extension` contributors. Please see our [LICENSE](./LICENSE) for copyright and license information. Detailed information including third-party components and their licensing/copyright information is available via the [REUSE tool](https://api.reuse.software/info/github.com/cap-js/cds-ts-extension).
