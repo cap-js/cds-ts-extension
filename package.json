@@ -34,7 +34,7 @@
     "devDependencies": {
         "@biomejs/biome": "^2",
         "@sap/cds": "10.x",
-        "@types/node": "24.x",
+        "@types/node": "^24.19.2",
         "typescript": "6.x"
     }
 }

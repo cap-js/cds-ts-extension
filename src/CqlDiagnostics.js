@@ -12,8 +12,8 @@ const { serviceAnnotationFor } = require('./ServiceAnnotation');
 
 /**
  * @param {QueryContext} ctx
- * @param {typeof TS} typescript
- * @returns {TS.Diagnostic[]}
+ * @param {TS} typescript
+ * @returns {import('typescript').Diagnostic[]}
  */
 function getCqlDiagnostics(
     ctx,

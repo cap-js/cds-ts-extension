@@ -138,7 +138,7 @@ class PersistentWorkerPool {
 
     /**
      * @param {string} projectRoot
-     * @param {TS['server']['Logger']} logger
+     * @param {import('typescript').server.Logger} logger
      * @returns {BridgeHandle}
      */
     getOrCreate(
@@ -195,7 +195,7 @@ class PersistentWorkerPool {
     /**
      * @param {string} projectRoot
      * @param {object} req
-     * @param {TS['server']['Logger']} logger
+     * @param {import('typescript').server.Logger} logger
      * @param {number} [timeoutMs]
      * @returns {unknown | null}
      */
@@ -286,7 +286,7 @@ const WORKER_POOL = new PersistentWorkerPool();
 
 /**
  * @param {string[]} args
- * @param {TS['server']['Logger']} logger
+ * @param {import('typescript').server.Logger} logger
  * @param {number} [timeoutMs]
  * @returns {WorkerResult | null}
  */
@@ -301,13 +301,13 @@ function runWorker(
         logger,
         timeoutMs,
     );
-    return r;
+    return /** @type {WorkerResult | null} */ (r);
 }
 
 /**
  * @param {string} projectRoot
  * @param {import('./QueryContext').BatchProbeRequest[]} probes
- * @param {TS['server']['Logger']} logger
+ * @param {import('typescript').server.Logger} logger
  * @returns {BatchProbeResult | null}
  */
 function runBatchWorker(
@@ -316,7 +316,7 @@ function runBatchWorker(
     logger,
 ) {
     const r = WORKER_POOL.call(projectRoot, { kind: 'batch', probes }, logger);
-    return r;
+    return /** @type {BatchProbeResult | null} */ (r);
 }
 
 const PROJECT_ROOT_CACHE = new Map();
@@ -350,21 +350,21 @@ function projectRootFor(fileName) {
 // ---------------------------------------------------------------------------
 
 /** Shape of internal tsserver ScriptInfo methods accessed by the plugin.
- * @typedef {TS['server']['ScriptInfo'] & { __cdsPatchedSnapshot?: boolean; __cdsOrigSnap?: () => TS['IScriptSnapshot'] }} CdsPatchedScriptInfo
+ * @typedef {import('typescript').server.ScriptInfo & { __cdsPatchedSnapshot?: boolean; __cdsOrigSnap?: () => import('typescript').IScriptSnapshot }} CdsPatchedScriptInfo
  */
 
-/** @typedef {TS['server']['Project']} CdsInternalProject */
+/** @typedef {import('typescript').server.Project} CdsInternalProject */
 
 /** Test-only injection point. Set before calling create(); cleared automatically after.
  * @type {TestOverrides}
  */
 const _TEST_OVERRIDES = {};
 
-/** @type {TS['server']['PluginModuleFactory']} */
+/** @type {import('typescript').server.PluginModuleFactory} */
 const pluginFactory = ({ typescript }) => {
     /** @type {import('./QueryContext').PluginConfig} */
     let config = readConfig({});
-    /** @type {TS['server']['Logger'] | undefined} */
+    /** @type {import('typescript').server.Logger | undefined} */
     let logger;
 
     return {
@@ -378,7 +378,7 @@ const pluginFactory = ({ typescript }) => {
 
             // Resolve the CQL query context for a file — the same 8-arg call is
             // needed by every feature proxy method below.
-            const ctxFor = (fileName) =>
+            const ctxFor = (/** @type {string} */ fileName) =>
                 resolveQueryContext(
                     fileName,
                     info,
@@ -386,7 +386,7 @@ const pluginFactory = ({ typescript }) => {
                     originalSource,
                     rw,
                     rwBatch,
-                    logger,
+                    logger ?? info.project.projectService.logger,
                     projectRootFor(fileName),
                 );
 
@@ -435,7 +435,7 @@ const pluginFactory = ({ typescript }) => {
 
             /**
              * @typedef {Object} DebounceEntry
-             * @property {ReturnType<typeof setTimeout>} timer
+             * @property {ReturnType<typeof setTimeout> | undefined} timer
              * @property {string} lastRewritten
              * @property {CdsPatchedScriptInfo | null} scriptInfo
              */
@@ -475,7 +475,7 @@ const pluginFactory = ({ typescript }) => {
                 // All three rewriteSnapshot call sites below share the same 9
                 // closure-captured args and differ only in the final opts object.
                 const rewrite = (
-                    opts,
+                    /** @type {{ typeExprCache?: Map<string, string>; cacheOnly?: boolean } | undefined} */ opts,
                 ) =>
                     rewriteSnapshot(
                         fileName,
@@ -485,7 +485,7 @@ const pluginFactory = ({ typescript }) => {
                         rewriteCache,
                         rw,
                         rwBatch,
-                        logger,
+                        logger ?? info.project.projectService.logger,
                         projectRootFor(fileName),
                         undefined,
                         rewrittenRanges,
@@ -666,14 +666,15 @@ const pluginFactory = ({ typescript }) => {
                         !unassignedWarned.has(fileName)
                     ) {
                         unassignedWarned.add(fileName);
-                        logger.info(
+                        logger?.info(
                             `[cds-plugin] ${fileName.split('/').pop()} is not assigned to a TS project — CQL features inactive. If this is a loose .js/.ts file, check that the vscode-cds extension registers @sap/cds-lsp with enableForWorkspaceTypeScriptVersions and activates on JavaScript/TypeScript.`,
                         );
                     }
                     return;
                 }
-                if (scriptInfo.__cdsPatchedSnapshot) return;
-                patchScriptInfoImpl(scriptInfo, fileName);
+                const si = /** @type {CdsPatchedScriptInfo} */ (scriptInfo);
+                if (si.__cdsPatchedSnapshot) return;
+                patchScriptInfoImpl(si, fileName);
             }
 
             /**
@@ -712,7 +713,7 @@ const pluginFactory = ({ typescript }) => {
                     lastRewritten: existing?.lastRewritten ?? '',
                     scriptInfo,
                 });
-                logger.info(
+                logger?.info(
                     `[cds-plugin] patched ScriptInfo for ${fileName.split('/').pop()}`,
                 );
                 if (triggerUpdate) {
@@ -723,12 +724,14 @@ const pluginFactory = ({ typescript }) => {
                 }
             }
 
-            const proxy = Object.create(null);
+            const proxy = /** @type {import('typescript').LanguageService} */ (Object.create(null));
+            const _proxy = /** @type {Record<string, Function>} */ (/** @type {unknown} */ (proxy));
+            const _ls = /** @type {Record<string, Function>} */ (/** @type {unknown} */ (ls));
             for (const k of Object.keys(ls)) {
-                const method = ls[k];
+                const method = _ls[k];
                 if (typeof method === 'function') {
-                    proxy[k] = (
-                        ...args
+                    _proxy[k] = (
+                        /** @type {unknown[]} */ ...args
                     ) =>
                         method.apply(
                             ls,
@@ -751,9 +754,9 @@ const pluginFactory = ({ typescript }) => {
                     ) {
                         for (const fn of project.getScriptFileNames()) {
                             if (patchedFiles.has(fn)) continue;
-                            const si = info.project.getScriptInfo(
+                            const si = /** @type {CdsPatchedScriptInfo | undefined} */ (info.project.getScriptInfo(
                                 fn,
-                            );
+                            ));
                             if (!si || si.__cdsPatchedSnapshot) continue;
                             const snap = si.getSnapshot();
                             const text = snap.getText(0, snap.getLength());
@@ -779,9 +782,9 @@ const pluginFactory = ({ typescript }) => {
                 /** @type {string[]} */
                 const cdsFileNames = [];
                 for (const fileName of project.getScriptFileNames()) {
-                    const si = info.project.getScriptInfo(
+                    const si = /** @type {CdsPatchedScriptInfo | undefined} */ (info.project.getScriptInfo(
                         fileName,
-                    );
+                    ));
                     if (!si) continue;
                     const snap = si.__cdsOrigSnap?.() ?? si.getSnapshot();
                     const text = snap.getText(0, snap.getLength());
@@ -924,9 +927,9 @@ const pluginFactory = ({ typescript }) => {
              * @returns {T}
              */
             function withOriginalSnapshot(fileName, fn) {
-                const si = info.project.getScriptInfo(
+                const si = /** @type {CdsPatchedScriptInfo | undefined} */ (info.project.getScriptInfo(
                     fileName,
-                );
+                ));
                 const origSnap = si?.__cdsOrigSnap;
                 if (!(si && origSnap && si.__cdsPatchedSnapshot)) return fn();
                 const patchedSnap = si.getSnapshot.bind(si);
@@ -1026,9 +1029,9 @@ const pluginFactory = ({ typescript }) => {
                 origLength,
                 staleEdit,
             ) {
-                const out = [];
+                const out = /** @type {number[]} */ ([]);
                 for (let i = 0; i < base.spans.length; i += 3) {
-                    const tokStart = base.spans[i];
+                    const tokStart = /** @type {number} */ (base.spans[i]);
                     if (tokStart >= origLength) continue;
                     if (
                         ranges?.some(
@@ -1048,7 +1051,7 @@ const pluginFactory = ({ typescript }) => {
                         }
                         // else: before the edit — position unchanged.
                     }
-                    out.push(projected, base.spans[i + 1], base.spans[i + 2]);
+                    out.push(projected, /** @type {number} */ (base.spans[i + 1]), /** @type {number} */ (base.spans[i + 2]));
                 }
                 return { spans: out, endOfLineState: base.endOfLineState };
             }
@@ -1070,17 +1073,17 @@ const pluginFactory = ({ typescript }) => {
                 edit,
             ) {
                 if (!edit) return cached;
-                const out = [];
+                const out = /** @type {number[]} */ ([]);
                 for (let i = 0; i < cached.spans.length; i += 3) {
-                    const tokStart = cached.spans[i];
+                    const tokStart = /** @type {number} */ (cached.spans[i]);
                     let projected = tokStart;
                     if (tokStart >= edit.staleSuffixStart)
                         projected = tokStart + edit.delta;
                     else if (tokStart >= edit.prefix) continue; // inside the edit — unknown
                     out.push(
                         projected,
-                        cached.spans[i + 1],
-                        cached.spans[i + 2],
+                        /** @type {number} */ (cached.spans[i + 1]),
+                        /** @type {number} */ (cached.spans[i + 2]),
                     );
                 }
                 return { spans: out, endOfLineState: cached.endOfLineState };
@@ -1152,7 +1155,7 @@ const pluginFactory = ({ typescript }) => {
                     live !== undefined
                         ? lastGoodSemantic.get(cacheKey)
                         : undefined;
-                if (good) {
+                if (good && live !== undefined) {
                     return reprojectFiltered(
                         good.result,
                         spliceDiff(good.source, live),
@@ -1194,7 +1197,7 @@ const pluginFactory = ({ typescript }) => {
     };
 };
 
-pluginFactory._testOverrides = _TEST_OVERRIDES;
+/** @type {import('typescript').server.PluginModuleFactory & { _testOverrides: typeof _TEST_OVERRIDES }} */ (pluginFactory)._testOverrides = _TEST_OVERRIDES;
 _TEST_OVERRIDES._runWorker = runWorker;
 _TEST_OVERRIDES._runBatchWorker = runBatchWorker;
 _TEST_OVERRIDES._workerPool = WORKER_POOL;

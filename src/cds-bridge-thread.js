@@ -89,10 +89,10 @@ child.on('exit', () => {
 });
 
 child.stderr.on('data', (d) => {
-    parentPort.postMessage({ type: 'stderr', text: d.toString() });
+    parentPort?.postMessage({ type: 'stderr', text: d.toString() });
 });
 
-parentPort.on('message', (msg) => {
+parentPort?.on('message', (msg) => {
     if (msg?.type === 'shutdown') {
         try {
             child.kill();

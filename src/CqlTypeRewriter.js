@@ -37,11 +37,11 @@ const {
 // ---------------------------------------------------------------------------
 
 /** A resolved `cds.ql` tagged template, plus whether it was `await`ed.
- * @typedef {{ template: TS.TaggedTemplateExpression; awaited: boolean }} CqlTemplateRef
+ * @typedef {{ template: import('typescript').TaggedTemplateExpression; awaited: boolean }} CqlTemplateRef
  */
 
 /**
- * @typedef {{ template: TS.TaggedTemplateExpression; awaited: boolean; varName: string }} CqlAssignment
+ * @typedef {{ template: import('typescript').TaggedTemplateExpression; awaited: boolean; varName: string }} CqlAssignment
  */
 
 // ---------------------------------------------------------------------------
@@ -49,8 +49,8 @@ const {
 // ---------------------------------------------------------------------------
 
 /**
- * @param {typeof TS} ts
- * @param {TS.TaggedTemplateExpression} node
+ * @param {TS} ts
+ * @param {import('typescript').TaggedTemplateExpression} node
  * @returns {string}
  */
 const extractTemplateText = (
@@ -65,8 +65,8 @@ const extractTemplateText = (
           );
 
 /** Returns the offset of `position` within the template literal content.
- * @param {typeof TS} ts
- * @param {TS.TaggedTemplateExpression} node
+ * @param {TS} ts
+ * @param {import('typescript').TaggedTemplateExpression} node
  * @param {number} position
  * @returns {number}
  */
@@ -83,16 +83,17 @@ const offsetInTemplate = (
 // ---------------------------------------------------------------------------
 
 /**
- * @param {typeof TS} ts
- * @param {TS.SourceFile} sourceFile
+ * @param {TS} ts
+ * @param {import('typescript').SourceFile} sourceFile
  * @param {number} position
- * @returns {TS.TaggedTemplateExpression | null}
+ * @returns {import('typescript').TaggedTemplateExpression | null}
  */
 function findCdsQueryTemplate(
     ts,
     sourceFile,
     position,
 ) {
+    /** @type {(node: import('typescript').Node) => import('typescript').TaggedTemplateExpression | null} */
     const visit = (node) =>
         ts.isTaggedTemplateExpression(node) &&
         isCdsQueryTag(ts, node.tag) &&
@@ -104,8 +105,8 @@ function findCdsQueryTemplate(
 }
 
 /**
- * @param {typeof TS} ts
- * @param {TS.SourceFile} sourceFile
+ * @param {TS} ts
+ * @param {import('typescript').SourceFile} sourceFile
  * @param {number} position
  * @returns {CqlTemplateRef | null}
  */
@@ -117,6 +118,7 @@ function resolveToCdsQuery(
     const direct = findCdsQueryTemplate(ts, sourceFile, position);
     if (direct) return { template: direct, awaited: false };
 
+    /** @type {(n: import('typescript').Node) => import('typescript').Node | null} */
     const findNode = (n) =>
         n.pos <= position && position <= n.end
             ? (ts.forEachChild(n, findNode) ?? n)
@@ -149,9 +151,9 @@ function resolveToCdsQuery(
 /** Like findOriginatingTemplate but scope-aware: searches only the innermost
  *  function/block that contains `ident`, so two variables named `x` in
  *  different scopes resolve to their own declarations.
- * @param {typeof TS} ts
- * @param {TS.Identifier} ident
- * @param {TS.SourceFile} sourceFile
+ * @param {TS} ts
+ * @param {import('typescript').Identifier} ident
+ * @param {import('typescript').SourceFile} sourceFile
  * @returns {CqlTemplateRef | null}
  */
 function findOriginatingTemplateInScope(
@@ -160,12 +162,13 @@ function findOriginatingTemplateInScope(
     sourceFile,
 ) {
     const scope =
-        findAncestor(ident, (n) => isScopeBoundary(ts, n)) ??
+        findAncestor(ident, /** @type {(n: import('typescript').Node) => n is import('typescript').Node} */ ((n) => isScopeBoundary(ts, n))) ??
         sourceFile;
 
     const name = ident.text;
+    /** @type {CqlTemplateRef | null} */
     let found = null;
-    function scan(n) {
+    function scan(/** @type {import('typescript').Node} */ n) {
         if (found) return;
         if (isNamedVarDecl(ts, n) && n.name.text === name) {
             const { expr: init, awaited } = unwrapAwait(ts, n.initializer);
@@ -179,16 +182,17 @@ function findOriginatingTemplateInScope(
 }
 
 /**
- * @param {typeof TS} ts
- * @param {TS.SourceFile} sourceFile
+ * @param {TS} ts
+ * @param {import('typescript').SourceFile} sourceFile
  * @returns {CqlAssignment[]}
  */
 function collectCqlAssignments(
     ts,
     sourceFile,
 ) {
+    /** @type {CqlAssignment[]} */
     const results = [];
-    function visit(node) {
+    function visit(/** @type {import('typescript').Node} */ node) {
         if (isDestructurableVarDecl(ts, node)) {
             const { expr: init, awaited } = unwrapAwait(ts, node.initializer);
             if (isCdsQlInit(ts, init)) {
@@ -231,7 +235,7 @@ function fieldTokenAtOffset(
     queryText,
     offset,
 ) {
-    const isIdChar = (c) => /[a-zA-Z0-9_$]/.test(c);
+    const isIdChar = (/** @type {string} */ c) => /[a-zA-Z0-9_$]/.test(c);
     if (
         !(
             isIdChar(queryText[offset] ?? '') ||
@@ -240,9 +244,9 @@ function fieldTokenAtOffset(
     )
         return null;
     let s = offset;
-    while (s > 0 && isIdChar(queryText[s - 1])) s--;
+    while (s > 0 && isIdChar(/** @type {string} */ (queryText[s - 1]))) s--;
     let e = offset;
-    while (e < queryText.length && isIdChar(queryText[e])) e++;
+    while (e < queryText.length && isIdChar(/** @type {string} */ (queryText[e]))) e++;
     const name = queryText.slice(s, e);
     return name ? { name, start: s, end: e } : null;
 }
@@ -381,12 +385,12 @@ function buildTypeBody(
  * miss (model not loaded, entity unknown, or no columns resolvable) so callers can
  * skip caching and retry later. The returned body has NO leading `{`/trailing `}[]`
  * wrapper — callers wrap it for their context (array row, single row, Promise).
- * @param {typeof TS} ts
+ * @param {TS} ts
  * @param {string} queryText
  * @param {string | undefined} effectivePrefix
  * @param {string} projectRoot
  * @param {RunBatchWorker} runBatchWorker
- * @param {TS.server.Logger} logger
+ * @param {import('typescript/lib/tsserverlibrary').server.Logger} logger
  * @returns {string | null}
  */
 function resolveRowTypeBody(
@@ -410,6 +414,7 @@ function resolveRowTypeBody(
     }));
     const batchResult = runBatchWorker(projectRoot, probes, logger);
 
+    /** @type {import('./CqlLogic').CompletionEntry[]} */
     const allFields = [];
     for (const { entity } of sources) {
         const fields = batchResult?.fields?.[entity] ?? [];
@@ -424,7 +429,7 @@ function resolveRowTypeBody(
     const parsedCols = parseCqlColumns(queryText);
 
     // Collect expand-target entity FQNs by BFS through the expand tree.
-    const batchFields = {};
+    const batchFields = /** @type {Record<string, import('./CqlLogic').CompletionEntry[]>} */ ({});
     if (parsedCols !== null) {
         for (const [entity, fields] of Object.entries(
             batchResult?.fields ?? {},
@@ -481,13 +486,13 @@ function resolveRowTypeBody(
  * `Promise<…>` form) for a single cds.ql query. Thin wrapper over
  * `resolveRowTypeBody` that applies the array/awaited wrapping. Returns null on a
  * worker miss so the caller can skip caching and retry later.
- * @param {typeof TS} ts
+ * @param {TS} ts
  * @param {string} queryText
  * @param {string | undefined} effectivePrefix
  * @param {boolean} awaited
  * @param {string} projectRoot
  * @param {RunBatchWorker} runBatchWorker
- * @param {TS.server.Logger} logger
+ * @param {import('typescript/lib/tsserverlibrary').server.Logger} logger
  * @returns {string | null}
  */
 function resolveTypeExpr(
@@ -517,17 +522,17 @@ function resolveTypeExpr(
  * Places the same-length cast for one resolved assignment into `replacements`
  * and appends its tail alias. Pure string/AST work — no worker involvement — so
  * it can run synchronously on every keystroke once the type is known.
- * @param {typeof TS} ts
- * @param {TS.SourceFile} sf
+ * @param {TS} ts
+ * @param {import('typescript').SourceFile} sf
  * @param {string} fileName
  * @param {string} sourceText
- * @param {TS.TaggedTemplateExpression} template
+ * @param {import('typescript').TaggedTemplateExpression} template
  * @param {string} varName
  * @param {string} typeExpr
  * @param {Array<{ start: number; end: number; text: string }>} replacements
  * @param {string[]} tailAliases
  * @param {Map<string, Array<{ start: number; end: number }>> | undefined} rewrittenRanges
- * @param {TS.server.Logger} logger
+ * @param {import('typescript/lib/tsserverlibrary').server.Logger} logger
  * @returns {void}
  */
 function placeCast(
@@ -599,7 +604,8 @@ function placeCast(
         // 1), which can push a query right at its budget limit to be skipped — an
         // acceptable trade for a cast that actually type-checks.
         const replaceStart = decl.name.end;
-        const replaceEnd = decl.initializer.end;
+        const replaceEnd = decl.initializer?.end;
+        if (replaceEnd === undefined) return;
         const budget = replaceEnd - replaceStart;
         const jsCast = ` = (/**@type{${aliasName}}*/({}))`;
 
@@ -638,12 +644,12 @@ function placeCast(
  * a side-effect so completions/hover can still find the original templates.
  * @param {string} fileName
  * @param {string} sourceText
- * @param {typeof TS} ts
+ * @param {TS} ts
  * @param {Map<string, string>} originalSource
  * @param {Map<string, { sourceText: string; rewritten: string }>} rewriteCache
  * @param {RunWorker} _runWorker
  * @param {RunBatchWorker} runBatchWorker
- * @param {TS.server.Logger} logger
+ * @param {import('typescript/lib/tsserverlibrary').server.Logger} logger
  * @param {string} projectRoot
  * @param {string | undefined} prefix
  * @param {Map<string, Array<{ start: number; end: number }>> | undefined} rewrittenRanges
@@ -695,7 +701,9 @@ function rewriteSnapshot(
         return sourceText;
     }
 
+    /** @type {Array<{ start: number; end: number; text: string }>} */
     const replacements = [];
+    /** @type {string[]} */
     const tailAliases = []; // type __cds_N = ...; lines appended at end
     let workerMiss = false; // true if any assignment was skipped because the worker returned no fields
 

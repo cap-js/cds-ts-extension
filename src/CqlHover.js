@@ -39,7 +39,7 @@ const { serviceAnnotationFor } = require('./ServiceAnnotation');
  * @param {string} name
  * @param {string} tsType
  * @param {{ leadingConst?: boolean }} [opts]
- * @returns {TS.SymbolDisplayPart[]}
+ * @returns {import('typescript').SymbolDisplayPart[]}
  */
 function fieldDisplayParts(
     name,
@@ -69,10 +69,10 @@ function fieldDisplayParts(
 /**
  * Probes the CDS model for fields from all sources in a tagged template query.
  * Returns a field map keyed by display name (alias if SELECT has explicit cols).
- * @param {TS.TaggedTemplateExpression} template
- * @param {typeof TS} typescript
+ * @param {import('typescript').TaggedTemplateExpression} template
+ * @param {TS} typescript
  * @param {string} origText
- * @param {TS.SourceFile} origSf
+ * @param {import('typescript').SourceFile} origSf
  * @param {string} projectRoot
  * @param {QueryContext['runWorker']} runWorker
  * @param {QueryContext['logger']} logger
@@ -132,10 +132,10 @@ function buildFieldMap(
  * type rewriter so hover matches the inferred variable type exactly. Returns null
  * on a worker miss (model not loaded / no columns resolvable) so callers fall back
  * to `unknown`.
- * @param {TS.TaggedTemplateExpression} template
- * @param {typeof TS} typescript
+ * @param {import('typescript').TaggedTemplateExpression} template
+ * @param {TS} typescript
  * @param {string} origText
- * @param {TS.SourceFile} origSf
+ * @param {import('typescript').SourceFile} origSf
  * @param {string} projectRoot
  * @param {QueryContext['runBatchWorker']} runBatchWorker
  * @param {QueryContext['logger']} logger
@@ -166,9 +166,9 @@ function buildHoverRowBody(
  *  (after unwrapping await) is a cds.ql tagged template. Also handles the case
  *  where the initializer is an Identifier that resolves to a cds.ql assignment
  *  within the same scope. Returns null if no cds.ql source is found.
- * @param {TS.Node} node
- * @param {typeof TS} typescript
- * @param {TS.SourceFile} origSf
+ * @param {import('typescript').Node} node
+ * @param {TS} typescript
+ * @param {import('typescript').SourceFile} origSf
  * @returns {CqlTemplateRef | null}
  */
 function findCqlSourceDecl(
@@ -193,8 +193,9 @@ function findCqlSourceDecl(
             if (typescript.isIdentifier(init)) {
                 const scope = findAncestorScope(cur, typescript, origSf);
                 const name = init.text;
+                /** @type {{ template: import('typescript').TaggedTemplateExpression; awaited: boolean } | null} */
                 let found = null;
-                const scan = (n) => {
+                const scan = (/** @type {import('typescript').Node} */ n) => {
                     if (found) return;
                     if (isNamedVarDecl(typescript, n) && n.name.text === name) {
                         const { expr: iinit, awaited: iawaited } = unwrapAwait(
@@ -221,10 +222,10 @@ function findCqlSourceDecl(
 }
 
 /**
- * @param {TS.Node} node
- * @param {typeof TS} typescript
- * @param {TS.SourceFile} root
- * @returns {TS.Node}
+ * @param {import('typescript').Node} node
+ * @param {TS} typescript
+ * @param {import('typescript').SourceFile} root
+ * @returns {import('typescript').Node}
  */
 function findAncestorScope(
     node,
@@ -243,8 +244,8 @@ function findAncestorScope(
  * @param {string} fileName
  * @param {number} position
  * @param {QueryContext} ctx
- * @param {typeof TS} typescript
- * @returns {TS.QuickInfo | null}
+ * @param {TS} typescript
+ * @returns {import('typescript').QuickInfo | null}
  */
 function getCqlHover(
     fileName,
@@ -366,6 +367,7 @@ function getCqlHover(
     }
 
     // Find the leaf AST node at the cursor position
+    /** @type {(n: import('typescript').Node) => import('typescript').Node | null} */
     const findNodeAt = (n) =>
         n.pos <= position && position <= n.end
             ? (typescript.forEachChild(n, findNodeAt) ?? n)

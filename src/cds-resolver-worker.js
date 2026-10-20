@@ -61,11 +61,11 @@ const { getSuggestions, validateCqlQuery } = require('./CqlLogic');
  */
 
 /** Test-only injection point. Allows tests to replace fs.watch with a synchronous stub. */
-const _testOverrides = {
+const _testOverrides = /** @type {{ watch?: typeof import('node:fs').watch; globalRoots?: () => string[] }} */ ({
     watch: undefined,
     /** Override the candidate global module roots used when @sap/cds is not local. Bypasses the memo. */
     globalRoots: undefined,
-};
+});
 
 /** Memoised global module roots (computed once per worker process). */
 let cachedGlobalRoots;
@@ -242,7 +242,7 @@ async function runBatchWorkerMain(projectRoot, payloadJson, write) {
     }
     const { defs } = loaded;
 
-    const fields = {};
+    const fields = /** @type {Record<string, import('./CqlLogic').CompletionEntry[]>} */ ({});
     for (const { entity, prefix } of probes) {
         fields[entity] = probeEntityFields(entity, prefix, defs);
     }
@@ -256,9 +256,9 @@ async function runBatchWorkerMain(projectRoot, payloadJson, write) {
  * @returns {Promise<void>}
  */
 async function runMain(argv, stdin, stdout) {
-    const [, , projectRoot, modeOrQuery, fourthArg, servicePrefix] = argv;
+    const [, , projectRoot, modeOrQuery, fourthArg, servicePrefix] = /** @type {string[]} */ (argv);
     if (modeOrQuery === '--batch') {
-        function writeBatch(result) {
+        function writeBatch(/** @type {BatchWorkerResult} */ result) {
             stdout.write(JSON.stringify(result) + '\n');
         }
         await runBatchWorkerMain(projectRoot, fourthArg, writeBatch).catch(
@@ -269,17 +269,20 @@ async function runMain(argv, stdin, stdout) {
         // Protocol: newline-delimited JSON on stdin/stdout.
         // Request:  { id, kind: 'single'|'batch', projectRoot, args?, probes? }
         // Response: { id, result: WorkerResult | BatchWorkerResult }
+        /** @type {CsnDefs | null} */
         let cachedDefs = null;
+        /** @type {string | null} */
         let cachedRoot = null;
+        /** @type {ReturnType<typeof setTimeout> | null} */
         let invalidateTimer = null;
 
         let watcher;
         try {
             const watchFn = _testOverrides.watch ?? watch;
             watcher = watchFn(
-                projectRoot,
+                /** @type {string} */ (projectRoot),
                 { recursive: true },
-                (_event, filename) => {
+                (/** @type {import('node:fs').WatchEventType} */ _event, /** @type {string | Buffer | null} */ filename) => {
                     if (
                         typeof filename === 'string' &&
                         filename.endsWith('.cds')
@@ -304,8 +307,9 @@ async function runMain(argv, stdin, stdout) {
         });
         let inFlight = 0;
         let closed = false;
+        /** @type {(() => void) | undefined} */
         let resolveAll;
-        await new Promise((resolve) => {
+        await /** @type {Promise<void>} */ (new Promise((resolve) => {
             resolveAll = resolve;
             rl.on('line', async (line) => {
                 inFlight++;
@@ -344,7 +348,7 @@ async function runMain(argv, stdin, stdout) {
 
                     let result;
                     if (req.kind === 'batch') {
-                        const fields = {};
+                        const fields = /** @type {Record<string, import('./CqlLogic').CompletionEntry[]>} */ ({});
                         for (const { entity, prefix } of req.probes ?? []) {
                             fields[entity] = probeEntityFields(
                                 entity,
@@ -377,14 +381,14 @@ async function runMain(argv, stdin, stdout) {
                     stdout.write(JSON.stringify({ id: req.id, result }) + '\n');
                 } finally {
                     inFlight--;
-                    if (closed && inFlight === 0) resolveAll();
+                    if (closed && inFlight === 0) resolveAll?.();
                 }
             });
             rl.on('close', () => {
                 closed = true;
                 if (inFlight === 0) resolve();
             });
-        });
+        }));
         // Clean up the fs.watch handle so it doesn't keep the event loop alive
         // (critical when runMain is called in-process from tests).
         if (invalidateTimer) clearTimeout(invalidateTimer);
@@ -394,7 +398,7 @@ async function runMain(argv, stdin, stdout) {
             /* ignore */
         }
     } else {
-        const write = (result) =>
+        const write = (/** @type {WorkerResult} */ result) =>
             stdout.write(JSON.stringify(result) + '\n');
         await runWorkerMain(
             projectRoot,

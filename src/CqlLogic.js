@@ -92,17 +92,18 @@ const CQL_KEYWORDS = new Set([
  * @returns {CqlToken[]}
  */
 function tokenizeCql(query) {
+    /** @type {CqlToken[]} */
     const tokens = [];
     let pos = 0;
     const len = query.length;
 
     while (pos < len) {
-        const ch = query[pos];
+        const ch = /** @type {string} */ (query[pos]);
 
         // Whitespace
         if (/\s/.test(ch)) {
             const start = pos;
-            while (pos < len && /\s/.test(query[pos])) pos++;
+            while (pos < len && /\s/.test(/** @type {string} */ (query[pos]))) pos++;
             tokens.push({
                 kind: 'whitespace',
                 value: query.slice(start, pos),
@@ -115,7 +116,7 @@ function tokenizeCql(query) {
         // Line comment
         if (ch === '/' && query[pos + 1] === '/') {
             const start = pos;
-            while (pos < len && query[pos] !== '\n') pos++;
+            while (pos < len && /** @type {string} */ (query[pos]) !== '\n') pos++;
             tokens.push({
                 kind: 'whitespace',
                 value: query.slice(start, pos),
@@ -129,7 +130,7 @@ function tokenizeCql(query) {
         if (ch === '/' && query[pos + 1] === '*') {
             const start = pos;
             pos += 2;
-            while (pos < len && !(query[pos] === '*' && query[pos + 1] === '/'))
+            while (pos < len && !(/** @type {string} */ (query[pos]) === '*' && query[pos + 1] === '/'))
                 pos++;
             pos += 2;
             tokens.push({
@@ -144,8 +145,8 @@ function tokenizeCql(query) {
         // String literal
         if (ch === "'") {
             const start = pos++;
-            while (pos < len && query[pos] !== "'") {
-                if (query[pos] === '\\') pos++;
+            while (pos < len && /** @type {string} */ (query[pos]) !== "'") {
+                if (/** @type {string} */ (query[pos]) === '\\') pos++;
                 pos++;
             }
             pos++;
@@ -161,7 +162,7 @@ function tokenizeCql(query) {
         // Quoted identifier
         if (ch === '"') {
             const start = pos++;
-            while (pos < len && query[pos] !== '"') pos++;
+            while (pos < len && /** @type {string} */ (query[pos]) !== '"') pos++;
             pos++;
             tokens.push({
                 kind: 'identifier',
@@ -214,7 +215,7 @@ function tokenizeCql(query) {
         // Number
         if (/\d/.test(ch)) {
             const start = pos;
-            while (pos < len && /[\d.]/.test(query[pos])) pos++;
+            while (pos < len && /[\d.]/.test(/** @type {string} */ (query[pos]))) pos++;
             tokens.push({
                 kind: 'number',
                 value: query.slice(start, pos),
@@ -227,10 +228,10 @@ function tokenizeCql(query) {
         // Identifier or keyword (including dotted names like Books.title)
         if (/[a-zA-Z_$]/.test(ch)) {
             const start = pos;
-            while (pos < len && /[a-zA-Z0-9_$.]/.test(query[pos])) pos++;
+            while (pos < len && /[a-zA-Z0-9_$.]/.test(/** @type {string} */ (query[pos]))) pos++;
             const value = query.slice(start, pos);
             const upper = value.toUpperCase();
-            const kind = CQL_KEYWORDS.has(upper) ? 'keyword' : 'identifier';
+            const kind = /** @type {'keyword' | 'identifier'} */ (CQL_KEYWORDS.has(upper) ? 'keyword' : 'identifier');
             tokens.push({ kind, value, start, end: pos });
             continue;
         }
@@ -283,7 +284,7 @@ function parseCqlColumns(queryText) {
         // consume: Entity [AS alias | alias] [JOIN ...]
         while (
             i < toks.length &&
-            !(toks[i].kind === 'punctuation' && toks[i].value === '{')
+            !(/** @type {CqlToken} */ (toks[i]).kind === 'punctuation' && /** @type {CqlToken} */ (toks[i]).value === '{')
         ) {
             i++;
         }
@@ -310,12 +311,12 @@ function parseClassicColumns(toks) {
         (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
     );
     if (sig.length === 0) return null;
-    if (sig.length === 1 && sig[0].kind === 'star') return null; // SELECT *
+    if (sig.length === 1 && /** @type {CqlToken} */ (sig[0]).kind === 'star') return null; // SELECT *
 
     const result = [];
     let i = 0;
     while (i < sig.length) {
-        const tok = sig[i];
+        const tok = /** @type {CqlToken} */ (sig[i]);
         if (tok.kind === 'punctuation' && tok.value === ',') {
             i++;
             continue;
@@ -329,7 +330,7 @@ function parseClassicColumns(toks) {
         }
 
         const field = tok.value.includes('.')
-            ? tok.value.split('.').pop()
+            ? tok.value.split('.').pop() ?? tok.value
             : tok.value;
         let alias = field;
         i++;
@@ -337,12 +338,12 @@ function parseClassicColumns(toks) {
         // AS alias only — implicit-alias detection is unreliable without comma boundaries
         if (
             i < sig.length &&
-            sig[i].kind === 'keyword' &&
-            sig[i].value.toUpperCase() === 'AS'
+            /** @type {CqlToken} */ (sig[i]).kind === 'keyword' &&
+            /** @type {CqlToken} */ (sig[i]).value.toUpperCase() === 'AS'
         ) {
             i++; // skip AS
-            if (i < sig.length && sig[i].kind === 'identifier') {
-                alias = sig[i].value;
+            if (i < sig.length && /** @type {CqlToken} */ (sig[i]).kind === 'identifier') {
+                alias = /** @type {CqlToken} */ (sig[i]).value;
                 i++;
             }
         }
@@ -363,7 +364,7 @@ function parseBraceBlock(toks, start) {
     const result = [];
     let i = start;
     while (i < toks.length) {
-        const tok = toks[i];
+        const tok = /** @type {CqlToken} */ (toks[i]);
 
         if (tok.kind === 'punctuation' && tok.value === '}') {
             return [result.length > 0 ? result : null, i + 1];
@@ -376,7 +377,7 @@ function parseBraceBlock(toks, start) {
             // consume remaining until '}'
             while (
                 i < toks.length &&
-                !(toks[i].kind === 'punctuation' && toks[i].value === '}')
+                !(/** @type {CqlToken} */ (toks[i]).kind === 'punctuation' && /** @type {CqlToken} */ (toks[i]).value === '}')
             )
                 i++;
             return [null, i + 1]; // * → all fields
@@ -390,7 +391,7 @@ function parseBraceBlock(toks, start) {
         const rawVal = tok.value.endsWith('.')
             ? tok.value.slice(0, -1)
             : tok.value;
-        const field = rawVal.includes('.') ? rawVal.split('.').pop() : rawVal;
+        const field = rawVal.includes('.') ? rawVal.split('.').pop() ?? rawVal : rawVal;
         // If the raw value ended with '.', the '{' is the very next token (no separate '.' token)
         const hasDot = tok.value.endsWith('.');
         let alias = field;
@@ -409,8 +410,8 @@ function parseBraceBlock(toks, start) {
             // Trailing dot already consumed in identifier — next token should be '{'
             if (
                 i < toks.length &&
-                toks[i].kind === 'punctuation' &&
-                toks[i].value === '{'
+                /** @type {CqlToken} */ (toks[i]).kind === 'punctuation' &&
+                /** @type {CqlToken} */ (toks[i]).value === '{'
             ) {
                 i++; // skip '{'
                 isExpand = true;
@@ -419,20 +420,20 @@ function parseBraceBlock(toks, start) {
             // Optional `AS alias`
             if (
                 i < toks.length &&
-                toks[i].kind === 'keyword' &&
-                toks[i].value.toUpperCase() === 'AS'
+                /** @type {CqlToken} */ (toks[i]).kind === 'keyword' &&
+                /** @type {CqlToken} */ (toks[i]).value.toUpperCase() === 'AS'
             ) {
                 i++; // skip AS
-                if (i < toks.length && toks[i].kind === 'identifier') {
-                    alias = toks[i].value;
+                if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'identifier') {
+                    alias = /** @type {CqlToken} */ (toks[i]).value;
                     i++;
                 }
             }
             // Expand block may follow either the bare field or the `AS alias`.
             if (
                 i < toks.length &&
-                toks[i].kind === 'punctuation' &&
-                toks[i].value === '{'
+                /** @type {CqlToken} */ (toks[i]).kind === 'punctuation' &&
+                /** @type {CqlToken} */ (toks[i]).value === '{'
             ) {
                 i++; // skip '{'
                 isExpand = true;
@@ -523,7 +524,7 @@ function getTokenContext(query, cursorOffset, defs, prefix) {
  * } CqlClause
  */
 
-const isNonNull = (x) => x !== null;
+const isNonNull = (/** @type {unknown} */ x) => x !== null;
 
 /**
  * @param {CqlToken[]} tokens
@@ -535,6 +536,7 @@ function getCursorClause(tokens, cursorOffset) {
         (t) => t.kind !== 'whitespace' && t.kind !== 'unknown',
     );
 
+    /** @type {CqlClause} */
     let clause = { kind: 'unknown' };
     const fromSources = [];
     let depth = 0;
@@ -763,7 +765,7 @@ function extractSourceRelations(significant) {
 
         if (tok.kind === 'identifier') {
             if (expectAlias) {
-                sources.push({ entity: pendingEntity, ref: tok.value });
+                sources.push({ entity: /** @type {string} */ (pendingEntity), ref: tok.value });
                 pendingEntity = null;
                 expectAlias = false;
             } else if (pendingEntity !== null) {
@@ -912,10 +914,10 @@ function followAssocPath(defs, startEntity, path) {
     let current = defs[startEntity];
     if (!current) return null;
     for (const assocName of path) {
-        const el = current.elements?.[assocName];
+        const el = /** @type {import('./csn').CsnElement | undefined} */ (current.elements?.[assocName]);
         if (!el) return null;
-        const fk = el['@odata.foreignKey4'];
-        const targetName = el.target ?? fk?.target;
+        const fk = /** @type {import('./csn').CsnElement | undefined} */ (el['@odata.foreignKey4']);
+        const targetName = /** @type {string | undefined} */ (el.target ?? fk?.target);
         if (!targetName) return null;
         current = defs[targetName];
         if (!current) return null;
@@ -961,6 +963,7 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
                     ? clause.sources
                     : extractSourceRelations(significant);
             const sources = GET_MODEL_SOURCES(defs, effectiveSources, prefix);
+            /** @type {CompletionEntry[]} */
             const items = [];
 
             // If inside an expand block, scope completions to the terminal association's target entity
@@ -1017,6 +1020,7 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
         }
 
         case 'from-source': {
+            /** @type {CompletionEntry[]} */
             const items = [];
             const qualifier = prefix ? prefix + '.' : null;
             for (const [fqn, artifact] of Object.entries(defs)) {
@@ -1046,6 +1050,7 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
         case 'unknown':
             return [];
     }
+    return [];
 }
 
 /**
@@ -1124,11 +1129,11 @@ function validateCqlQuery(query, defs, prefix) {
                 expandArtifactStack.push(root);
             } else {
                 // Nested expand — look up association target from parent artifact
-                const parent =
-                    expandArtifactStack[expandArtifactStack.length - 1];
+                const parent = /** @type {import('./csn').CsnArtifact | null | undefined} */ (
+                    expandArtifactStack[expandArtifactStack.length - 1]);
                 if (parent && lastIdentifier) {
-                    const el = parent.elements?.[lastIdentifier];
-                    const targetName = el?.target;
+                    const el = /** @type {import('./csn').CsnElement | undefined} */ (parent.elements?.[lastIdentifier]);
+                    const targetName = /** @type {string | undefined} */ (el?.target);
                     expandArtifactStack.push(
                         targetName ? (defs[targetName] ?? null) : null,
                     );
@@ -1332,7 +1337,7 @@ function collectFromSourceTokens(significant) {
 
         if (tok.kind === 'identifier') {
             if (expectAlias) {
-                result.push({ entityToken: pendingEntity, ref: tok.value });
+                result.push({ entityToken: /** @type {CqlToken} */ (pendingEntity), ref: tok.value });
                 pendingEntity = null;
                 expectAlias = false;
             } else if (pendingEntity !== null) {

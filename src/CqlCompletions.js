@@ -19,8 +19,8 @@ const { serviceAnnotationFor } = require('./ServiceAnnotation');
  * @param {string} fileName
  * @param {number} position
  * @param {QueryContext} ctx
- * @param {typeof TS} typescript
- * @returns {TS.CompletionInfo | null}
+ * @param {TS} typescript
+ * @returns {import('typescript').CompletionInfo | null}
  */
 function getCqlCompletions(
     fileName,
@@ -71,7 +71,7 @@ function getCqlCompletions(
             sortText: '0_' + c.label,
             labelDetails: c.detail ? { detail: `: ${c.detail}` } : undefined,
             ...(isEntity && !prefix
-                ? { hasAction: true, source: `cds:${c.detail}` }
+                ? /** @type {{ hasAction: true; source: string }} */ ({ hasAction: true, source: `cds:${c.detail}` })
                 : {}),
         };
     });
@@ -94,8 +94,8 @@ function getCqlCompletions(
  * @param {string} entryName
  * @param {string | undefined} source
  * @param {QueryContext} ctx
- * @param {typeof TS} typescript
- * @returns {TS.CompletionEntryDetails | null}
+ * @param {TS} typescript
+ * @returns {import('typescript').CompletionEntryDetails | null}
  */
 function getCqlCompletionDetails(
     fileName,

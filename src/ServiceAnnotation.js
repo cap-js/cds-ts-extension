@@ -17,6 +17,7 @@
  * @returns {string | undefined}
  */
 function serviceAnnotationFor(typescript, sourceText, node, sf) {
+    /** @type {import('typescript').Node} */
     let stmt = node;
     while (stmt.parent && stmt.parent !== sf) {
         if (typescript.isVariableStatement(stmt)) break;
