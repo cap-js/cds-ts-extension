@@ -45,7 +45,7 @@ const { join } = require('node:path');
 function withCursor(template) {
     const cursor = template.indexOf('|');
     assert.ok(cursor !== -1, 'template must contain exactly one | marker');
-    return { query: template.replace('|', ''), cursor };
+    return { query: template.replace(/\|/g, ''), cursor };
 }
 
 /** Minimal CDS model definitions object for tests. */
@@ -1952,7 +1952,7 @@ describe('getCqlCompletions — proxy simulation', () => {
     });
 
     it('returns null when worker returns no completions', () => {
-        const src = 'const r = cds.ql`SELECT | FROM Books`'.replace('|', '');
+        const src = 'const r = cds.ql`SELECT | FROM Books`'.replace(/\|/g, '');
         const pos = posOf(src, 'SELECT') + 7; // inside SELECT clause
         const ctx = makeCtx(src, EMPTY_WORKER);
         const result = getCqlCompletions('test.ts', pos, ctx, TS);
