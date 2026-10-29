@@ -687,6 +687,76 @@ describe('validateCqlQuery', () => {
         // Parentheses increase depth; tokens inside must be skipped for validation
         assert.deepEqual(validateCqlQuery('SELECT ID FROM Books WHERE ID IN (SELECT 1)', model, 'Svc'), []);
     });
+
+    it('does not flag an aggregate function name as an unknown field', () => {
+        // Regression: `max` is a function, not a field — must not be flagged.
+        assert.deepEqual(validateCqlQuery('SELECT max(ID) as ID FROM Books', model, 'Svc'), []);
+    });
+
+    it('accepts count(*) without flagging count or the star', () => {
+        assert.deepEqual(validateCqlQuery('SELECT count(*) as n FROM Books', model, 'Svc'), []);
+    });
+
+    it('still validates the field argument of a function call', () => {
+        const errs = validateCqlQuery('SELECT max(ghost) as x FROM Books', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.ok(errs[0].message.includes("Unknown field 'ghost'"), 'expected the argument to be flagged');
+        assert.equal('SELECT max(ghost) as x FROM Books'.slice(errs[0].start, errs[0].end), 'ghost');
+    });
+
+    it('accepts a function call alongside plain columns', () => {
+        assert.deepEqual(validateCqlQuery('SELECT title, max(ID) as mx FROM Books', model, 'Svc'), []);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Draft shadow entities (`<Entity>.drafts`) — not in the compiled CSN, so a
+// trailing `.drafts` is stripped and resolved against the base entity.
+// ---------------------------------------------------------------------------
+
+describe('draft entities (.drafts suffix)', () => {
+    const model = defs({
+        'Svc.Books': { ID: 'cds.UUID', title: 'cds.String' },
+    });
+    const fqnModel = {
+        'sap.capire.bookshop.Books': {
+            kind: 'entity',
+            elements: { ID: { type: 'cds.UUID' }, title: { type: 'cds.String' } },
+        },
+    };
+
+    it('resolves a prefixed draft entity to its base (no diagnostics)', () => {
+        assert.deepEqual(validateCqlQuery('SELECT ID FROM Books.drafts', model, 'Svc'), []);
+    });
+
+    it('resolves a fully-qualified draft entity to its base (no diagnostics)', () => {
+        assert.deepEqual(validateCqlQuery('SELECT ID FROM sap.capire.bookshop.Books.drafts', fqnModel, undefined), []);
+    });
+
+    it('validates fields against the base entity for a draft query', () => {
+        const errs = validateCqlQuery('SELECT ghost FROM Books.drafts', model, 'Svc');
+        assert.ok(
+            errs.find((e) => e.message.includes("Unknown field 'ghost'")),
+            'expected the bad field to be flagged against the base entity',
+        );
+    });
+
+    it('still flags a genuinely unknown entity carrying a .drafts suffix', () => {
+        const errs = validateCqlQuery('SELECT ID FROM Nope.drafts', model, 'Svc');
+        assert.ok(
+            errs.find((e) => e.message.includes('Unknown entity')),
+            'expected unknown-entity diagnostic',
+        );
+    });
+
+    it('suggests base-entity fields inside a draft-entity query', () => {
+        const { query, cursor } = withCursor('SELECT | FROM Books.drafts');
+        const items = getSuggestions(query, cursor, model, 'Svc');
+        includesAll(
+            items.map((i) => i.label),
+            ['ID', 'title'],
+        );
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -4159,6 +4229,48 @@ describe('parseCqlColumns', () => {
         // Unterminated block with only a comma — hits end-of-tokens path with empty result
         const result = parseCqlColumns('SELECT FROM Books { ,');
         assert.equal(result, null);
+    });
+
+    it('parses an aggregate function column with AS alias as a single column', () => {
+        const result = parseCqlColumns('SELECT max(ID) as ID FROM Books');
+        assert.deepEqual(result, [{ field: 'max', alias: 'ID' }]);
+    });
+
+    it('parses count(*) with alias as a single column', () => {
+        const result = parseCqlColumns('SELECT count(*) as n FROM Books');
+        assert.deepEqual(result, [{ field: 'count', alias: 'n' }]);
+    });
+
+    it('names an unaliased function column after the function', () => {
+        const result = parseCqlColumns('SELECT max(ID) FROM Books');
+        assert.deepEqual(result, [{ field: 'max', alias: 'max' }]);
+    });
+
+    it('parses a multi-argument function column', () => {
+        const result = parseCqlColumns('SELECT round(price, 2) as p FROM Books');
+        assert.deepEqual(result, [{ field: 'round', alias: 'p' }]);
+    });
+
+    it('parses a function column mixed with plain columns', () => {
+        const result = parseCqlColumns('SELECT title, max(ID) as mx FROM Books');
+        assert.deepEqual(result, [
+            { field: 'title', alias: 'title' },
+            { field: 'max', alias: 'mx' },
+        ]);
+    });
+
+    it('parses a function column inside a postfix brace block', () => {
+        const result = parseCqlColumns('SELECT FROM Books { ID, max(stock) as m }');
+        assert.deepEqual(result, [
+            { field: 'ID', alias: 'ID' },
+            { field: 'max', alias: 'm' },
+        ]);
+    });
+
+    it('tolerates an unbalanced function paren (consumes to end)', () => {
+        // Missing ')' — skipBalancedParens consumes the rest; no crash, one column.
+        const result = parseCqlColumns('SELECT max(ID FROM Books');
+        assert.deepEqual(result, [{ field: 'max', alias: 'max' }]);
     });
 });
 

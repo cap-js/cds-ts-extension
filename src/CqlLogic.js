@@ -295,6 +295,36 @@ function parseCqlColumns(queryText) {
  * @param {CqlToken[]} toks
  * @returns {ExpandColumn[] | null}
  */
+/**
+ * If the token at `toks[i]` opens a function-call argument list (a '('),
+ * returns the index just past the matching ')'. Otherwise returns `i`
+ * unchanged. Handles nested parens.
+ * @param {CqlToken[]} toks
+ * @param {number} i index of the '(' (or any token)
+ * @returns {number}
+ */
+function skipBalancedParens(toks, i) {
+    const open = /** @type {CqlToken | undefined} */ (toks[i]);
+    if (!open || open.kind !== 'punctuation' || open.value !== '(') return i;
+    let depth = 0;
+    let j = i;
+    while (j < toks.length) {
+        const t = /** @type {CqlToken} */ (toks[j]);
+        if (t.kind === 'punctuation' && t.value === '(') depth++;
+        else if (t.kind === 'punctuation' && t.value === ')') {
+            depth--;
+            if (depth === 0) return j + 1;
+        }
+        j++;
+    }
+    return j; // unbalanced — consume to end
+}
+
+/**
+ * Parse a comma-separated classic column list (SELECT a, b, c FROM …).
+ * @param {CqlToken[]} toks
+ * @returns {ExpandColumn[] | null}
+ */
 function parseClassicColumns(toks) {
     // Filter to non-whitespace/unknown (already filtered by caller, but be safe)
     const sig = toks.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
@@ -317,9 +347,16 @@ function parseClassicColumns(toks) {
             continue;
         }
 
-        const field = tok.value.includes('.') ? (tok.value.split('.').pop() ?? tok.value) : tok.value;
-        let alias = field;
+        const bareField = tok.value.includes('.') ? (tok.value.split('.').pop() ?? tok.value) : tok.value;
         i++;
+
+        // Function call: `fn(args)` — consume the argument span and name the
+        // column after the function (overridden by a trailing AS alias below).
+        let field = bareField;
+        if (i < sig.length && /** @type {CqlToken} */ (sig[i]).kind === 'punctuation' && /** @type {CqlToken} */ (sig[i]).value === '(') {
+            i = skipBalancedParens(sig, i);
+        }
+        let alias = field;
 
         // AS alias only — implicit-alias detection is unreliable without comma boundaries
         if (i < sig.length && /** @type {CqlToken} */ (sig[i]).kind === 'keyword' && /** @type {CqlToken} */ (sig[i]).value.toUpperCase() === 'AS') {
@@ -374,6 +411,23 @@ function parseBraceBlock(toks, start) {
         const hasDot = tok.value.endsWith('.');
         let alias = field;
         i++;
+
+        // Function call: `fn(args)` — consume the argument span. A function
+        // column cannot be an expand and has no trailing dot, so handle it
+        // before the expand/AS logic. The column is named after the function
+        // unless a trailing AS alias overrides it below.
+        if (!hasDot && i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'punctuation' && /** @type {CqlToken} */ (toks[i]).value === '(') {
+            i = skipBalancedParens(toks, i);
+            if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'keyword' && /** @type {CqlToken} */ (toks[i]).value.toUpperCase() === 'AS') {
+                i++; // skip AS
+                if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'identifier') {
+                    alias = /** @type {CqlToken} */ (toks[i]).value;
+                    i++;
+                }
+            }
+            result.push({ field, alias });
+            continue;
+        }
 
         // Check for expand: `field {`, `field.{` (inline expand), or `field as alias {`.
         // The tokenizer merges `identifier.` into a single identifier token ending with '.'.
@@ -813,12 +867,18 @@ const isFromJoinKw = (t) => t?.kind === 'keyword' && /^(FROM|JOIN|INNER|LEFT|RIG
  * @returns {{ fqn: string, artifact: CsnArtifact } | null}
  */
 function resolveSource(defs, name, prefix) {
-    const key = prefix ? `${prefix}.${name}` : name;
+    // Draft shadow entities (`<Entity>.drafts`) are not materialised in the
+    // compiled CSN — they are generated at runtime by the drafts feature. Strip
+    // a trailing `.drafts` and resolve against the base entity, which carries
+    // the same element set.
+    const base = name.endsWith('.drafts') ? name.slice(0, -'.drafts'.length) : name;
+
+    const key = prefix ? `${prefix}.${base}` : base;
     const artifact = defs[key];
     if (artifact?.kind && SOURCE_KINDS.has(artifact.kind)) return { fqn: key, artifact };
     // Also try fully-qualified lookup when name already includes a dot
-    const byFqn = name.includes('.') ? defs[name] : undefined;
-    if (byFqn?.kind && SOURCE_KINDS.has(byFqn.kind)) return { fqn: name, artifact: byFqn };
+    const byFqn = base.includes('.') ? defs[base] : undefined;
+    if (byFqn?.kind && SOURCE_KINDS.has(byFqn.kind)) return { fqn: base, artifact: byFqn };
     return null;
 }
 
@@ -1007,7 +1067,13 @@ function validateCqlQuery(query, defs, prefix) {
         for (const name of names) elementCount.set(name, (elementCount.get(name) ?? 0) + 1);
     }
 
-    let depth = 0;
+    // Paren stack: each entry is 'args' (a function-call argument list, whose
+    // field arguments are still validated) or 'skip' (a subquery/grouping paren
+    // whose contents are ignored, e.g. `… IN (SELECT 1)`). Contents are skipped
+    // whenever any enclosing paren is a 'skip' paren.
+    /** @type {Array<'args' | 'skip'>} */
+    const parenStack = [];
+    const inSkippedParen = () => parenStack.includes('skip');
     let braceDepth = 0;
     // Stack of resolved entity artifacts — one per brace level; null = unresolvable
     const expandArtifactStack = [];
@@ -1015,17 +1081,30 @@ function validateCqlQuery(query, defs, prefix) {
     let afterOrderKeyword = false;
     let expectAlias = false;
     let lastIdentifier = null; // identifier before a potential '{'
+    let prevWasFieldIdentifier = false; // previous significant token was a bare field identifier
 
-    for (const tok of significant) {
+    for (let idx = 0; idx < significant.length; idx++) {
+        const tok = /** @type {CqlToken} */ (significant[idx]);
         if (tok.kind === 'punctuation' && tok.value === '(') {
-            depth++;
+            // A '(' immediately after a bare identifier in a column/predicate
+            // context is a function-call argument list (max(ID), count(x), …);
+            // its arguments are still validated. Anything else (subquery,
+            // grouping) is skipped wholesale.
+            const isFnArgs = prevWasFieldIdentifier && (clause === 'select' || clause === 'where' || clause === 'order_by');
+            parenStack.push(isFnArgs ? 'args' : 'skip');
+            prevWasFieldIdentifier = false;
             continue;
         }
         if (tok.kind === 'punctuation' && tok.value === ')') {
-            depth = Math.max(0, depth - 1);
+            parenStack.pop();
+            prevWasFieldIdentifier = false;
             continue;
         }
-        if (depth > 0) continue;
+        prevWasFieldIdentifier = false;
+        if (inSkippedParen()) continue;
+        // Inside a function-argument paren a lone '*' (e.g. count(*)) is not a
+        // field reference and must not be flagged.
+        if (parenStack.length > 0 && tok.kind === 'star') continue;
 
         // Brace handling for expand blocks
         if (tok.kind === 'punctuation' && tok.value === '{') {
@@ -1115,6 +1194,19 @@ function validateCqlQuery(query, defs, prefix) {
         }
 
         lastIdentifier = tok.value;
+
+        // Any identifier here may be the name preceding a function-call '(' —
+        // mark it so a following '(' is treated as an argument list rather than
+        // a subquery/grouping paren.
+        prevWasFieldIdentifier = true;
+
+        // Function call: an identifier immediately followed by '(' is a function
+        // name (max, count, sum, …), not a field. Don't validate it; the opening
+        // paren that follows becomes an 'args' paren whose arguments are checked.
+        const next = significant[idx + 1];
+        if (next && next.kind === 'punctuation' && next.value === '(') {
+            continue;
+        }
 
         if (clause === 'select' || clause === 'where' || clause === 'order_by') {
             // Inside an expand block — validate against the current expand context entity
