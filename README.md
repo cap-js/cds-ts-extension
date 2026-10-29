@@ -86,6 +86,8 @@ And enable features in `.vscode/settings.json`:
 "cds.ql.typeInference": true
 ```
 
+> **Note:** The [SAP CDS Language Support](https://marketplace.visualstudio.com/items?itemName=SAPSE.vscode-cds) extension must be installed and active in the same window. It is responsible for pushing the `cds.ql.*` feature flags to tsserver at startup — without it the plugin loads but all features stay disabled.
+
 ## Requirements
 
 To **use** the plugin (via `vscode-cds`):
