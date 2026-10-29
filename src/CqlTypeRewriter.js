@@ -235,6 +235,27 @@ function padWithNewlines(cast, sourceText, start, end) {
 }
 
 /**
+ * Infers the TS type of a function-call result column.
+ *   - `count` → `number` (row/value count).
+ *   - arg-preserving aggregates (`max`/`min`/`sum`/`avg`) → the TS type of the
+ *     single field argument, resolved via the field map.
+ *   - anything else (unknown function, `*`, multi-arg, or unresolvable arg) →
+ *     `unknown`.
+ * @param {string} func lowercased function name
+ * @param {string | undefined} arg single field argument name, if any
+ * @param {Map<string, CompletionEntry>} fieldMap
+ * @returns {string}
+ */
+function aggregateResultType(func, arg, fieldMap) {
+    if (func === 'count') return 'number';
+    if (func === 'max' || func === 'min' || func === 'sum' || func === 'avg') {
+        const entry = arg ? fieldMap.get(arg) : undefined;
+        if (entry && !entry.target) return cdsTypeToTs(entry.detail);
+    }
+    return 'unknown';
+}
+
+/**
  * Recursively builds a TS object-type body string from a parsed column tree.
  * cols=null means SELECT * at this level → use all scalar fields from fieldMap.
  * Association columns with an expand sub-tree recurse into batchFields[target].
@@ -260,6 +281,11 @@ function buildTypeBody(cols, fieldMap, batchFields) {
                 const subMap = new Map((subFields ?? []).map((f) => [f.label, f]));
                 const subBody = buildTypeBody(col.expand.length === 0 ? null : col.expand, subMap, batchFields);
                 entries.push(`${col.alias}:{${subBody}}${assocEntry?.toMany ? '[]' : ''}`);
+            } else if (col.func) {
+                // Function-call column: infer the result type. `count` is always
+                // numeric; arg-preserving aggregates (max/min/sum/avg) take the
+                // type of their single field argument; anything else is unknown.
+                entries.push(`${col.alias}:${aggregateResultType(col.func, col.arg, fieldMap)}`);
             } else {
                 const entry = fieldMap.get(col.field);
                 if (entry) {
@@ -585,6 +611,7 @@ module.exports = {
     resolveToCdsQuery,
     collectCqlAssignments,
     buildTypeString,
+    buildTypeBody,
     fieldTokenAtOffset,
     resolveRowTypeBody,
     rewriteSnapshot,

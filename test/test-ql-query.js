@@ -17,6 +17,7 @@ const {
 /** @typedef {import('../src/CqlLogic').CqlSource} CqlSource */
 const {
     buildTypeString,
+    buildTypeBody,
     collectCqlAssignments,
     extractTemplateText,
     fieldTokenAtOffset,
@@ -3248,6 +3249,44 @@ describe('buildTypeString', () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildTypeBody — function-call (aggregate) result types
+// ---------------------------------------------------------------------------
+
+describe('buildTypeBody — aggregate functions', () => {
+    // fieldMap mirrors what the worker probe returns for an entity's elements
+    const fieldMap = new Map([
+        ['ID', { label: 'ID', kind: 'field', detail: 'cds.Integer' }],
+        ['title', { label: 'title', kind: 'field', detail: 'cds.String' }],
+        ['stock', { label: 'stock', kind: 'field', detail: 'cds.Integer' }],
+    ]);
+
+    it('infers number for count(*)', () => {
+        const cols = parseCqlColumns('SELECT count(*) as n FROM Books');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'n:number');
+    });
+
+    it('infers the argument type for max/min/sum/avg', () => {
+        const cols = parseCqlColumns('SELECT max(ID) as hi, avg(stock) as a, min(title) as lo FROM Books');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'hi:number;a:number;lo:string');
+    });
+
+    it('falls back to unknown for an unrecognised function', () => {
+        const cols = parseCqlColumns('SELECT weird(ID) as w FROM Books');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'w:unknown');
+    });
+
+    it('falls back to unknown when the aggregate argument is unresolvable', () => {
+        const cols = parseCqlColumns('SELECT max(ghost) as x FROM Books');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'x:unknown');
+    });
+
+    it('mixes aggregate and plain columns', () => {
+        const cols = parseCqlColumns('SELECT title, count(*) as n FROM Books');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'title:string;n:number');
+    });
+});
+
+// ---------------------------------------------------------------------------
 // fieldTokenAtOffset — edge cases
 // ---------------------------------------------------------------------------
 
@@ -4233,29 +4272,29 @@ describe('parseCqlColumns', () => {
 
     it('parses an aggregate function column with AS alias as a single column', () => {
         const result = parseCqlColumns('SELECT max(ID) as ID FROM Books');
-        assert.deepEqual(result, [{ field: 'max', alias: 'ID' }]);
+        assert.deepEqual(result, [{ field: 'max', alias: 'ID', func: 'max', arg: 'ID' }]);
     });
 
     it('parses count(*) with alias as a single column', () => {
         const result = parseCqlColumns('SELECT count(*) as n FROM Books');
-        assert.deepEqual(result, [{ field: 'count', alias: 'n' }]);
+        assert.deepEqual(result, [{ field: 'count', alias: 'n', func: 'count', arg: undefined }]);
     });
 
     it('names an unaliased function column after the function', () => {
         const result = parseCqlColumns('SELECT max(ID) FROM Books');
-        assert.deepEqual(result, [{ field: 'max', alias: 'max' }]);
+        assert.deepEqual(result, [{ field: 'max', alias: 'max', func: 'max', arg: 'ID' }]);
     });
 
     it('parses a multi-argument function column', () => {
         const result = parseCqlColumns('SELECT round(price, 2) as p FROM Books');
-        assert.deepEqual(result, [{ field: 'round', alias: 'p' }]);
+        assert.deepEqual(result, [{ field: 'round', alias: 'p', func: 'round', arg: 'price' }]);
     });
 
     it('parses a function column mixed with plain columns', () => {
         const result = parseCqlColumns('SELECT title, max(ID) as mx FROM Books');
         assert.deepEqual(result, [
             { field: 'title', alias: 'title' },
-            { field: 'max', alias: 'mx' },
+            { field: 'max', alias: 'mx', func: 'max', arg: 'ID' },
         ]);
     });
 
@@ -4263,14 +4302,14 @@ describe('parseCqlColumns', () => {
         const result = parseCqlColumns('SELECT FROM Books { ID, max(stock) as m }');
         assert.deepEqual(result, [
             { field: 'ID', alias: 'ID' },
-            { field: 'max', alias: 'm' },
+            { field: 'max', alias: 'm', func: 'max', arg: 'stock' },
         ]);
     });
 
     it('tolerates an unbalanced function paren (consumes to end)', () => {
         // Missing ')' — skipBalancedParens consumes the rest; no crash, one column.
         const result = parseCqlColumns('SELECT max(ID FROM Books');
-        assert.deepEqual(result, [{ field: 'max', alias: 'max' }]);
+        assert.deepEqual(result, [{ field: 'max', alias: 'max', func: 'max', arg: undefined }]);
     });
 });
 

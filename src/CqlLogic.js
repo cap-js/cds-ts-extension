@@ -35,7 +35,10 @@ const { csnEntryKind, csnText } = require('./csn');
 
 /**
  * A column in a CQL projection — flat (no expand) or nested (expand block).
- * @typedef {{ field: string, alias: string, expand?: ExpandColumn[] }} ExpandColumn
+ * For a function-call column (`max(ID) as hi`), `func` is the lowercased
+ * function name and `arg` is the single field argument (if any), used to infer
+ * the result type.
+ * @typedef {{ field: string, alias: string, expand?: ExpandColumn[], func?: string, arg?: string }} ExpandColumn
  */
 
 /** @typedef {{ UnknownEntity: 9001, UnknownSource: 9002, UnknownField: 9003, AmbiguousField: 9004 }} CqlDiagnosticCodeEnum */
@@ -297,27 +300,36 @@ function parseCqlColumns(queryText) {
  */
 /**
  * If the token at `toks[i]` opens a function-call argument list (a '('),
- * returns the index just past the matching ')'. Otherwise returns `i`
- * unchanged. Handles nested parens.
+ * returns the index just past the matching ')' and the single field argument
+ * (when the parens contain exactly one identifier, e.g. `max(ID)`). Otherwise
+ * returns `{ end: i, arg: undefined }`. Handles nested parens.
  * @param {CqlToken[]} toks
  * @param {number} i index of the '(' (or any token)
- * @returns {number}
+ * @returns {{ end: number, arg: string | undefined }}
  */
 function skipBalancedParens(toks, i) {
     const open = /** @type {CqlToken | undefined} */ (toks[i]);
-    if (!open || open.kind !== 'punctuation' || open.value !== '(') return i;
+    if (!open || open.kind !== 'punctuation' || open.value !== '(') return { end: i, arg: undefined };
     let depth = 0;
     let j = i;
+    /** @type {string[]} */
+    const idents = [];
     while (j < toks.length) {
         const t = /** @type {CqlToken} */ (toks[j]);
         if (t.kind === 'punctuation' && t.value === '(') depth++;
         else if (t.kind === 'punctuation' && t.value === ')') {
             depth--;
-            if (depth === 0) return j + 1;
-        }
+            if (depth === 0) {
+                // A single bare identifier argument (max(ID)) lets us infer the
+                // result type from that field. '*', multi-arg, or expressions
+                // leave arg undefined.
+                const arg = idents.length === 1 ? idents[0] : undefined;
+                return { end: j + 1, arg };
+            }
+        } else if (t.kind === 'identifier') idents.push(t.value);
         j++;
     }
-    return j; // unbalanced — consume to end
+    return { end: j, arg: undefined }; // unbalanced — consume to end
 }
 
 /**
@@ -352,9 +364,17 @@ function parseClassicColumns(toks) {
 
         // Function call: `fn(args)` — consume the argument span and name the
         // column after the function (overridden by a trailing AS alias below).
-        let field = bareField;
+        // Record the function name and single field argument for type inference.
+        const field = bareField;
+        /** @type {string | undefined} */
+        let func;
+        /** @type {string | undefined} */
+        let arg;
         if (i < sig.length && /** @type {CqlToken} */ (sig[i]).kind === 'punctuation' && /** @type {CqlToken} */ (sig[i]).value === '(') {
-            i = skipBalancedParens(sig, i);
+            func = bareField.toLowerCase();
+            const r = skipBalancedParens(sig, i);
+            i = r.end;
+            arg = r.arg;
         }
         let alias = field;
 
@@ -366,7 +386,7 @@ function parseClassicColumns(toks) {
                 i++;
             }
         }
-        result.push({ field, alias });
+        result.push(func ? { field, alias, func, arg } : { field, alias });
     }
     return result.length > 0 ? result : null;
 }
@@ -415,9 +435,12 @@ function parseBraceBlock(toks, start) {
         // Function call: `fn(args)` — consume the argument span. A function
         // column cannot be an expand and has no trailing dot, so handle it
         // before the expand/AS logic. The column is named after the function
-        // unless a trailing AS alias overrides it below.
+        // unless a trailing AS alias overrides it below. Record func/arg for
+        // type inference.
         if (!hasDot && i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'punctuation' && /** @type {CqlToken} */ (toks[i]).value === '(') {
-            i = skipBalancedParens(toks, i);
+            const func = field.toLowerCase();
+            const r = skipBalancedParens(toks, i);
+            i = r.end;
             if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'keyword' && /** @type {CqlToken} */ (toks[i]).value.toUpperCase() === 'AS') {
                 i++; // skip AS
                 if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'identifier') {
@@ -425,7 +448,7 @@ function parseBraceBlock(toks, start) {
                     i++;
                 }
             }
-            result.push({ field, alias });
+            result.push({ field, alias, func, arg: r.arg });
             continue;
         }
 
