@@ -320,9 +320,10 @@ function skipBalancedParens(toks, i) {
         else if (t.kind === 'punctuation' && t.value === ')') {
             depth--;
             if (depth === 0) {
-                // A single bare identifier argument (max(ID)) lets us infer the
-                // result type from that field. '*', multi-arg, or expressions
-                // leave arg undefined.
+                // When the parens contain exactly one identifier token (e.g.
+                // `max(ID)` or `max(B.ID)`) we expose it as the argument so the
+                // result type can be inferred from that field. A `*`, multiple
+                // identifiers, or no identifier at all leaves arg undefined.
                 const arg = idents.length === 1 ? idents[0] : undefined;
                 return { end: j + 1, arg };
             }
@@ -1104,7 +1105,7 @@ function validateCqlQuery(query, defs, prefix) {
     let afterOrderKeyword = false;
     let expectAlias = false;
     let lastIdentifier = null; // identifier before a potential '{'
-    let prevWasFieldIdentifier = false; // previous significant token was a bare field identifier
+    let prevWasIdentifier = false; // previous significant token was an identifier (field or function-call candidate)
 
     for (let idx = 0; idx < significant.length; idx++) {
         const tok = /** @type {CqlToken} */ (significant[idx]);
@@ -1113,17 +1114,17 @@ function validateCqlQuery(query, defs, prefix) {
             // context is a function-call argument list (max(ID), count(x), …);
             // its arguments are still validated. Anything else (subquery,
             // grouping) is skipped wholesale.
-            const isFnArgs = prevWasFieldIdentifier && (clause === 'select' || clause === 'where' || clause === 'order_by');
+            const isFnArgs = prevWasIdentifier && (clause === 'select' || clause === 'where' || clause === 'order_by');
             parenStack.push(isFnArgs ? 'args' : 'skip');
-            prevWasFieldIdentifier = false;
+            prevWasIdentifier = false;
             continue;
         }
         if (tok.kind === 'punctuation' && tok.value === ')') {
             parenStack.pop();
-            prevWasFieldIdentifier = false;
+            prevWasIdentifier = false;
             continue;
         }
-        prevWasFieldIdentifier = false;
+        prevWasIdentifier = false;
         if (inSkippedParen()) continue;
         // Inside a function-argument paren a lone '*' (e.g. count(*)) is not a
         // field reference and must not be flagged.
@@ -1221,7 +1222,7 @@ function validateCqlQuery(query, defs, prefix) {
         // Any identifier here may be the name preceding a function-call '(' —
         // mark it so a following '(' is treated as an argument list rather than
         // a subquery/grouping paren.
-        prevWasFieldIdentifier = true;
+        prevWasIdentifier = true;
 
         // Function call: an identifier immediately followed by '(' is a function
         // name (max, count, sum, …), not a field. Don't validate it; the opening

@@ -3270,6 +3270,12 @@ describe('buildTypeBody — aggregate functions', () => {
         assert.equal(buildTypeBody(cols, fieldMap, {}), 'hi:number;a:number;lo:string');
     });
 
+    it('infers the argument type for a qualified aggregate argument', () => {
+        // arg is `B.ID`; fieldMap is keyed by the bare label `ID`.
+        const cols = parseCqlColumns('SELECT max(B.ID) as hi FROM Books AS B');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'hi:number');
+    });
+
     it('falls back to unknown for an unrecognised function', () => {
         const cols = parseCqlColumns('SELECT weird(ID) as w FROM Books');
         assert.equal(buildTypeBody(cols, fieldMap, {}), 'w:unknown');

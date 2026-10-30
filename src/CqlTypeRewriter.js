@@ -249,7 +249,9 @@ function padWithNewlines(cast, sourceText, start, end) {
 function aggregateResultType(func, arg, fieldMap) {
     if (func === 'count') return 'number';
     if (func === 'max' || func === 'min' || func === 'sum' || func === 'avg') {
-        const entry = arg ? fieldMap.get(arg) : undefined;
+        // The arg may be qualified (`B.ID`) while fieldMap is keyed by bare
+        // labels (`ID`) — fall back to the final path segment.
+        const entry = arg ? (fieldMap.get(arg) ?? fieldMap.get(arg.split('.').pop() ?? arg)) : undefined;
         if (entry && !entry.target) return cdsTypeToTs(entry.detail);
     }
     return 'unknown';
