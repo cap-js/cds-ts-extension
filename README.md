@@ -14,6 +14,10 @@ on the CDS Language Server — it resolves `@sap/cds` directly from the user's p
 > configuration, diagnostic codes, and the worker protocol — lives in
 > [`DEVELOPMENT.md`](./DEVELOPMENT.md).
 
+
+## Known Limitations
+- this extension currently does not work in a monorepo-scenario or when multiple workspaces are opened in a single vsode instance.
+
 ## Layout
 
 | Path | Contents |
