@@ -399,25 +399,21 @@ function resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatc
 }
 
 /**
- * Builds the awaited result type expression for a write statement (UPDATE /
- * INSERT / UPSERT / DELETE). Prefers the user's own `cds` typings via
- * `ReturnType<typeof cds.X>`; when `cds` is untyped (`any`) it falls back to a
- * concrete type using the `IfAny` idiom (`0 extends (1 & T)` is true only when
- * `T` is `any`). The returned expression is the **awaited value** type; the
- * caller applies the `Promise<…>` wrapping for the non-awaited case.
+ * Builds the awaited result-value type for a write statement. CAP resolves an
+ * awaited write query to an affected-row count (`UPDATE`/`DELETE`) or an insert
+ * result (`INSERT`/`UPSERT`). We emit fixed concrete types rather than deriving
+ * from `typeof cds` — `@sap/cds` is usually untyped, and an `any`-fallback guard
+ * proved too brittle (it leaks back to `any`). The returned expression is the
+ * **awaited value** type; the caller wraps it in `Promise<…>` when not awaited.
  *
- *   UPDATE / DELETE → fallback `number` (affected-row count)
- *   INSERT / UPSERT → fallback `{ affected: number }` (CAP InsertResult accessor)
+ *   UPDATE / DELETE → `number` (affected-row count)
+ *   INSERT / UPSERT → `{ affected: number }` (CAP InsertResult accessor)
  *
  * @param {'UPDATE' | 'DELETE' | 'INSERT' | 'UPSERT'} kind
  * @returns {string} the awaited value type expression
  */
 function writeStatementValueType(kind) {
-    const fallback = kind === 'INSERT' || kind === 'UPSERT' ? '{affected:number}' : 'number';
-    // `Awaited<…>` unwraps the builder's thenable to its resolved value so the
-    // wrapping below (Promise<…> vs bare) is applied uniformly.
-    const real = `Awaited<ReturnType<typeof cds.${kind}>>`;
-    return `0 extends (1&${real})?${fallback}:${real}`;
+    return kind === 'INSERT' || kind === 'UPSERT' ? '{affected:number}' : 'number';
 }
 
 const WRITE_STATEMENT_RE = /^\s*(UPDATE|INSERT|UPSERT|DELETE)\b/i;

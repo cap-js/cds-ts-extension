@@ -3420,28 +3420,32 @@ describe('resolveTypeExpr — write statements', () => {
     const logger = { info() {}, error() {} };
     const expr = (q, awaited) => resolveTypeExpr(TS, q, undefined, awaited, '/proj', noWorker, logger);
 
-    it('UPDATE (awaited) → number fallback guarded by IfAny', () => {
-        assert.equal(expr('UPDATE Books SET stock = 1 WHERE ID = 2', true), '0 extends (1&Awaited<ReturnType<typeof cds.UPDATE>>)?number:Awaited<ReturnType<typeof cds.UPDATE>>');
+    it('UPDATE (awaited) → number', () => {
+        assert.equal(expr('UPDATE Books SET stock = 1 WHERE ID = 2', true), 'number');
     });
 
-    it('UPDATE (non-awaited) → Promise-wrapped', () => {
-        assert.equal(expr('UPDATE Books SET stock = 1', false), 'Promise<0 extends (1&Awaited<ReturnType<typeof cds.UPDATE>>)?number:Awaited<ReturnType<typeof cds.UPDATE>>>');
+    it('UPDATE (non-awaited) → Promise<number>', () => {
+        assert.equal(expr('UPDATE Books SET stock = 1', false), 'Promise<number>');
     });
 
-    it('DELETE (awaited) → number fallback', () => {
-        assert.equal(expr('DELETE FROM Books WHERE ID = 1', true), '0 extends (1&Awaited<ReturnType<typeof cds.DELETE>>)?number:Awaited<ReturnType<typeof cds.DELETE>>');
+    it('DELETE (awaited) → number', () => {
+        assert.equal(expr('DELETE FROM Books WHERE ID = 1', true), 'number');
     });
 
-    it('INSERT (awaited) → { affected: number } fallback', () => {
-        assert.equal(expr('INSERT INTO Books (ID) VALUES (1)', true), '0 extends (1&Awaited<ReturnType<typeof cds.INSERT>>)?{affected:number}:Awaited<ReturnType<typeof cds.INSERT>>');
+    it('INSERT (awaited) → { affected: number }', () => {
+        assert.equal(expr('INSERT INTO Books (ID) VALUES (1)', true), '{affected:number}');
     });
 
-    it('UPSERT (awaited) → { affected: number } fallback', () => {
-        assert.equal(expr('UPSERT INTO Books ENTRIES { ID: 1 }', true), '0 extends (1&Awaited<ReturnType<typeof cds.UPSERT>>)?{affected:number}:Awaited<ReturnType<typeof cds.UPSERT>>');
+    it('UPSERT (awaited) → { affected: number }', () => {
+        assert.equal(expr('UPSERT INTO Books ENTRIES { ID: 1 }', true), '{affected:number}');
+    });
+
+    it('INSERT (non-awaited) → Promise<{ affected: number }>', () => {
+        assert.equal(expr('INSERT INTO Books (ID) VALUES (1)', false), 'Promise<{affected:number}>');
     });
 
     it('is case-insensitive and tolerates leading whitespace', () => {
-        assert.equal(expr('  update Books SET stock = 1', true), '0 extends (1&Awaited<ReturnType<typeof cds.UPDATE>>)?number:Awaited<ReturnType<typeof cds.UPDATE>>');
+        assert.equal(expr('  update Books SET stock = 1', true), 'number');
     });
 
     it('does not treat SELECT as a write statement (would call the worker)', () => {
