@@ -204,7 +204,7 @@ function tokenizeCql(query) {
         }
 
         // Punctuation
-        if (/[,;()[\]{}]/.test(ch)) {
+        if (/[,;:()[\]{}]/.test(ch)) {
             tokens.push({
                 kind: 'punctuation',
                 value: ch,
@@ -885,6 +885,28 @@ function isToMany(el) {
 const isFromJoinKw = (t) => t?.kind === 'keyword' && /^(FROM|JOIN|INNER|LEFT|RIGHT|FULL|CROSS)$/i.test(t.value);
 
 /**
+ * Returns the set of valid field names for an artifact: its own elements plus
+ * the generated foreign-key columns for each managed association/composition
+ * (`<assoc>_<key>`, e.g. association `flight` with key `ID` → `flight_ID`).
+ * These FK columns are valid references but are not top-level elements in an
+ * unresolved CSN view.
+ * @param {CsnArtifact} artifact
+ * @returns {Set<string>}
+ */
+function elementNamesWithForeignKeys(artifact) {
+    const names = new Set(Object.keys(artifact.elements ?? {}));
+    for (const [name, el] of Object.entries(artifact.elements ?? {})) {
+        const keys = /** @type {Array<{ ref?: string[] }> | undefined} */ (/** @type {any} */ (el).keys);
+        if (!keys) continue;
+        for (const k of keys) {
+            const ref = k.ref;
+            if (ref && ref.length) names.add(`${name}_${ref.join('_')}`);
+        }
+    }
+    return names;
+}
+
+/**
  * @param {CsnDefs} defs
  * @param {string} name
  * @param {string | undefined} prefix
@@ -1058,6 +1080,17 @@ function validateCqlQuery(query, defs, prefix) {
     const errors = [];
     const tokens = tokenizeCql(query);
     const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
+
+    // Write statements (UPDATE / INSERT / UPSERT) have no FROM clause, so they
+    // are validated by a dedicated path. DELETE has a FROM and flows through the
+    // SELECT-oriented logic below.
+    const head = significant[0];
+    if (head && head.kind === 'identifier') {
+        const kw = head.value.toUpperCase();
+        if (kw === 'UPDATE' || kw === 'INSERT' || kw === 'UPSERT') {
+            return validateWriteStatement(significant, defs, prefix);
+        }
+    }
 
     // Collect FROM/JOIN sources and validate them
     const fromEntries = collectFromSourceTokens(significant);
@@ -1297,6 +1330,157 @@ function validateCqlQuery(query, defs, prefix) {
         }
     }
 
+    return errors;
+}
+
+/**
+ * Validates an UPDATE / INSERT / UPSERT statement: resolves the target entity
+ * and checks the field positions (SET targets + WHERE fields for UPDATE; the
+ * column list / ENTRIES keys for INSERT/UPSERT). Literal values (RHS of `=`,
+ * VALUES lists) are never validated. Tolerant of partial/mid-typing input.
+ * @param {CqlToken[]} significant tokens with whitespace/unknown already removed
+ * @param {CsnDefs} defs
+ * @param {string} [prefix]
+ * @returns {CqlDiagnostic[]}
+ */
+function validateWriteStatement(significant, defs, prefix) {
+    /** @type {CqlDiagnostic[]} */
+    const errors = [];
+    const kw = /** @type {CqlToken} */ (significant[0]).value.toUpperCase();
+    const isUpdate = kw === 'UPDATE';
+
+    // Locate the target entity token.
+    //   UPDATE <entity> …                → token at index 1
+    //   INSERT|UPSERT INTO <entity> …     → token after the INTO keyword
+    let entityIdx;
+    if (isUpdate) {
+        entityIdx = 1;
+    } else {
+        const intoIdx = significant.findIndex((t) => t.kind === 'keyword' && t.value.toUpperCase() === 'INTO');
+        entityIdx = intoIdx === -1 ? -1 : intoIdx + 1;
+    }
+    const entityToken = entityIdx >= 0 ? significant[entityIdx] : undefined;
+    if (!entityToken || entityToken.kind !== 'identifier') return errors; // partial input
+
+    const resolved = resolveSource(defs, entityToken.value, prefix);
+    if (!resolved) {
+        errors.push({
+            message: `Unknown entity or view '${entityToken.value}'`,
+            start: entityToken.start,
+            end: entityToken.end,
+            code: CqlDiagnosticCode.UnknownEntity,
+        });
+        return errors;
+    }
+    const elements = elementNamesWithForeignKeys(resolved.artifact);
+
+    /** Push an UnknownField diagnostic for `tok` unless its field exists. */
+    const checkField = (/** @type {CqlToken} */ tok) => {
+        // Qualified `alias.field` → validate the final segment (single source).
+        const field = tok.value.includes('.') ? (tok.value.split('.').pop() ?? tok.value) : tok.value;
+        const dot = tok.value.lastIndexOf('.');
+        if (!elements.has(field)) {
+            errors.push({
+                message: `Unknown field '${field}'`,
+                start: dot >= 0 ? tok.start + dot + 1 : tok.start,
+                end: tok.end,
+                code: CqlDiagnosticCode.UnknownField,
+            });
+        }
+    };
+
+    if (isUpdate) {
+        // Find SET … and WHERE … regions.
+        const setIdx = significant.findIndex((t) => t.kind === 'identifier' && t.value.toUpperCase() === 'SET');
+        const whereIdx = significant.findIndex((t) => t.kind === 'keyword' && t.value.toUpperCase() === 'WHERE');
+        const setEnd = whereIdx === -1 ? significant.length : whereIdx;
+
+        if (setIdx !== -1) {
+            const objectForm = significant[setIdx + 1]?.kind === 'punctuation' && significant[setIdx + 1]?.value === '{';
+            if (objectForm) {
+                // SET { field: value , field: value } — key is the identifier before each ':'
+                for (let i = setIdx + 2; i < setEnd; i++) {
+                    const t = /** @type {CqlToken} */ (significant[i]);
+                    const nxt = significant[i + 1];
+                    if (t.kind === 'identifier' && nxt && nxt.kind === 'punctuation' && nxt.value === ':') checkField(t);
+                }
+            } else {
+                // SET field = value [, field = value] — the field is the
+                // identifier at the start of each comma-separated assignment.
+                let atTarget = true;
+                for (let i = setIdx + 1; i < setEnd; i++) {
+                    const t = /** @type {CqlToken} */ (significant[i]);
+                    if (t.kind === 'punctuation' && t.value === ',') {
+                        atTarget = true;
+                        continue;
+                    }
+                    if (atTarget) {
+                        if (t.kind === 'identifier') checkField(t);
+                        atTarget = false; // only the first token of the assignment is the target
+                    }
+                }
+            }
+        }
+
+        // WHERE clause: validate identifier operands (the LHS/RHS of predicates),
+        // skipping keywords/operators/literals. A function call `fn(field)` keeps
+        // the field as a plain identifier operand, so no special handling needed.
+        if (whereIdx !== -1) {
+            for (let i = whereIdx + 1; i < significant.length; i++) {
+                const t = /** @type {CqlToken} */ (significant[i]);
+                if (t.kind !== 'identifier') continue;
+                // Skip function names (identifier immediately followed by '(').
+                const nxt = significant[i + 1];
+                if (nxt && nxt.kind === 'punctuation' && nxt.value === '(') continue;
+                // Skip SQL logical keywords that tokenize as identifiers are not a
+                // concern here (AND/OR/NOT/IN/IS/LIKE/BETWEEN are keywords).
+                checkField(t);
+            }
+        }
+        return errors;
+    }
+
+    // INSERT / UPSERT — validate column names only.
+    // Column list: `( c , c )` directly after the entity, or after a COLUMNS id.
+    // ENTRIES object: `{ c : v , c : v }` — keys are identifiers before ':'.
+    const entriesIdx = significant.findIndex((t) => t.kind === 'identifier' && t.value.toUpperCase() === 'ENTRIES');
+    const valuesIdx = significant.findIndex((t) => t.kind === 'identifier' && t.value.toUpperCase() === 'VALUES');
+
+    if (entriesIdx !== -1) {
+        const braceStart = entriesIdx + 1;
+        if (significant[braceStart]?.kind === 'punctuation' && significant[braceStart]?.value === '{') {
+            for (let i = braceStart + 1; i < significant.length; i++) {
+                const t = /** @type {CqlToken} */ (significant[i]);
+                if (t.kind === 'punctuation' && t.value === '}') break;
+                const nxt = significant[i + 1];
+                if (t.kind === 'identifier' && nxt && nxt.kind === 'punctuation' && nxt.value === ':') checkField(t);
+            }
+        }
+        return errors;
+    }
+
+    // Column-list form: the first '(' after the entity (and before VALUES) holds
+    // the column names. Any identifier inside that paren group is a column.
+    let openIdx = -1;
+    for (let i = entityIdx + 1; i < significant.length; i++) {
+        const t = /** @type {CqlToken} */ (significant[i]);
+        if (valuesIdx !== -1 && i >= valuesIdx) break; // don't descend into VALUES
+        if (t.kind === 'punctuation' && t.value === '(') {
+            openIdx = i;
+            break;
+        }
+    }
+    if (openIdx !== -1) {
+        let depth = 0;
+        for (let i = openIdx; i < significant.length; i++) {
+            const t = /** @type {CqlToken} */ (significant[i]);
+            if (t.kind === 'punctuation' && t.value === '(') depth++;
+            else if (t.kind === 'punctuation' && t.value === ')') {
+                depth--;
+                if (depth === 0) break;
+            } else if (t.kind === 'identifier') checkField(t);
+        }
+    }
     return errors;
 }
 

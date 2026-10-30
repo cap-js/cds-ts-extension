@@ -18,6 +18,7 @@ const {
 const {
     buildTypeString,
     buildTypeBody,
+    resolveTypeExpr,
     collectCqlAssignments,
     extractTemplateText,
     fieldTokenAtOffset,
@@ -757,6 +758,122 @@ describe('draft entities (.drafts suffix)', () => {
             items.map((i) => i.label),
             ['ID', 'title'],
         );
+    });
+});
+
+// ---------------------------------------------------------------------------
+// validateCqlQuery — write statements (UPDATE / INSERT / UPSERT)
+// ---------------------------------------------------------------------------
+
+describe('validateCqlQuery — write statements', () => {
+    const model = defs({
+        'Svc.Books': { ID: 'cds.UUID', title: 'cds.String', stock: 'cds.Integer' },
+    });
+
+    // --- UPDATE ---
+    it('accepts a valid UPDATE with SET and WHERE', () => {
+        assert.deepEqual(validateCqlQuery("UPDATE Books SET title = 'x' WHERE ID = 1", model, 'Svc'), []);
+    });
+
+    it('reports unknown entity on UPDATE', () => {
+        const errs = validateCqlQuery('UPDATE Nope SET title = 1', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.equal(errs[0].code, CqlDiagnosticCode.UnknownEntity);
+        assert.ok(errs[0].message.includes('Nope'));
+    });
+
+    it('reports unknown field in SET target', () => {
+        const q = 'UPDATE Books SET bogus = 1';
+        const errs = validateCqlQuery(q, model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.equal(errs[0].code, CqlDiagnosticCode.UnknownField);
+        assert.equal(q.slice(errs[0].start, errs[0].end), 'bogus');
+    });
+
+    it('reports unknown field in WHERE clause', () => {
+        const errs = validateCqlQuery('UPDATE Books SET title = 1 WHERE bogus = 2', model, 'Svc');
+        assert.ok(errs.find((e) => e.message.includes("Unknown field 'bogus'")));
+    });
+
+    it('does not flag SET right-hand-side values', () => {
+        // `stock` is a valid field, but here it is used as a literal-ish RHS; the
+        // target `title` is valid, so no diagnostics.
+        assert.deepEqual(validateCqlQuery('UPDATE Books SET title = 1', model, 'Svc'), []);
+    });
+
+    it('accepts the SET object form', () => {
+        assert.deepEqual(validateCqlQuery('UPDATE Books SET { title: 1 }', model, 'Svc'), []);
+    });
+
+    it('reports unknown field in SET object form', () => {
+        const errs = validateCqlQuery('UPDATE Books SET { bogus: 1 }', model, 'Svc');
+        assert.ok(errs.find((e) => e.message.includes("Unknown field 'bogus'")));
+    });
+
+    it('validates each target in a multi-assignment SET', () => {
+        const errs = validateCqlQuery('UPDATE Books SET title = 1, bogus = 2', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.ok(errs[0].message.includes("Unknown field 'bogus'"));
+    });
+
+    it('resolves a .drafts UPDATE target to the base entity', () => {
+        assert.deepEqual(validateCqlQuery('UPDATE Books.drafts SET title = 1', model, 'Svc'), []);
+    });
+
+    it('accepts a generated foreign-key column in WHERE (managed association)', () => {
+        // `author` association with key `ID` generates a valid `author_ID` FK column.
+        const assocModel = {
+            'Svc.Books': {
+                kind: 'entity',
+                elements: {
+                    ID: { type: 'cds.UUID' },
+                    author: { type: 'cds.Association', target: 'Svc.Authors', keys: [{ ref: ['ID'] }] },
+                },
+            },
+            'Svc.Authors': { kind: 'entity', elements: { ID: { type: 'cds.UUID' } } },
+        };
+        assert.deepEqual(validateCqlQuery('UPDATE Books SET ID = 1 WHERE author_ID = 2', assocModel, 'Svc'), []);
+    });
+
+    // --- INSERT / UPSERT ---
+    it('accepts a valid INSERT column list', () => {
+        assert.deepEqual(validateCqlQuery("INSERT INTO Books (ID, title) VALUES (1, 'x')", model, 'Svc'), []);
+    });
+
+    it('reports unknown column in INSERT column list', () => {
+        const errs = validateCqlQuery('INSERT INTO Books (ID, bogus) VALUES (1, 2)', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.ok(errs[0].message.includes("Unknown field 'bogus'"));
+    });
+
+    it('accepts the COLUMNS (...) form', () => {
+        assert.deepEqual(validateCqlQuery('INSERT INTO Books COLUMNS (ID, title) VALUES (1, 2)', model, 'Svc'), []);
+    });
+
+    it('accepts the ENTRIES object form and flags bad keys', () => {
+        assert.deepEqual(validateCqlQuery('INSERT INTO Books ENTRIES { ID: 1, title: 2 }', model, 'Svc'), []);
+        const errs = validateCqlQuery('INSERT INTO Books ENTRIES { bogus: 1 }', model, 'Svc');
+        assert.ok(errs.find((e) => e.message.includes("Unknown field 'bogus'")));
+    });
+
+    it('reports unknown entity on INSERT/UPSERT', () => {
+        assert.ok(validateCqlQuery('INSERT INTO Nope (ID) VALUES (1)', model, 'Svc').find((e) => e.code === CqlDiagnosticCode.UnknownEntity));
+        assert.ok(validateCqlQuery('UPSERT INTO Nope ENTRIES { ID: 1 }', model, 'Svc').find((e) => e.code === CqlDiagnosticCode.UnknownEntity));
+    });
+
+    it('never flags VALUES list contents as fields', () => {
+        // `title` appears only inside VALUES, not the column list — must not flag.
+        assert.deepEqual(validateCqlQuery('INSERT INTO Books (ID) VALUES (title)', model, 'Svc'), []);
+    });
+
+    // --- regression guards ---
+    it('leaves SELECT aggregate validation unchanged', () => {
+        assert.deepEqual(validateCqlQuery('SELECT max(ID) as ID FROM Books', model, 'Svc'), []);
+    });
+
+    it('leaves DELETE validation unchanged', () => {
+        const errs = validateCqlQuery('DELETE FROM Books WHERE bogus = 1', model, 'Svc');
+        assert.ok(errs.find((e) => e.message.includes("Unknown field 'bogus'")));
     });
 });
 
@@ -3293,7 +3410,48 @@ describe('buildTypeBody — aggregate functions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// fieldTokenAtOffset — edge cases
+// resolveTypeExpr — write-statement result types (UPDATE/INSERT/UPSERT/DELETE)
+// ---------------------------------------------------------------------------
+
+describe('resolveTypeExpr — write statements', () => {
+    // A worker stub that fails the test if called: write statements must be typed
+    // purely from `typeof cds`, with no model probe.
+    const noWorker = () => assert.fail('runBatchWorker must not be called for a write statement');
+    const logger = { info() {}, error() {} };
+    const expr = (q, awaited) => resolveTypeExpr(TS, q, undefined, awaited, '/proj', noWorker, logger);
+
+    it('UPDATE (awaited) → number fallback guarded by IfAny', () => {
+        assert.equal(expr('UPDATE Books SET stock = 1 WHERE ID = 2', true), '0 extends (1&Awaited<ReturnType<typeof cds.UPDATE>>)?number:Awaited<ReturnType<typeof cds.UPDATE>>');
+    });
+
+    it('UPDATE (non-awaited) → Promise-wrapped', () => {
+        assert.equal(expr('UPDATE Books SET stock = 1', false), 'Promise<0 extends (1&Awaited<ReturnType<typeof cds.UPDATE>>)?number:Awaited<ReturnType<typeof cds.UPDATE>>>');
+    });
+
+    it('DELETE (awaited) → number fallback', () => {
+        assert.equal(expr('DELETE FROM Books WHERE ID = 1', true), '0 extends (1&Awaited<ReturnType<typeof cds.DELETE>>)?number:Awaited<ReturnType<typeof cds.DELETE>>');
+    });
+
+    it('INSERT (awaited) → { affected: number } fallback', () => {
+        assert.equal(expr('INSERT INTO Books (ID) VALUES (1)', true), '0 extends (1&Awaited<ReturnType<typeof cds.INSERT>>)?{affected:number}:Awaited<ReturnType<typeof cds.INSERT>>');
+    });
+
+    it('UPSERT (awaited) → { affected: number } fallback', () => {
+        assert.equal(expr('UPSERT INTO Books ENTRIES { ID: 1 }', true), '0 extends (1&Awaited<ReturnType<typeof cds.UPSERT>>)?{affected:number}:Awaited<ReturnType<typeof cds.UPSERT>>');
+    });
+
+    it('is case-insensitive and tolerates leading whitespace', () => {
+        assert.equal(expr('  update Books SET stock = 1', true), '0 extends (1&Awaited<ReturnType<typeof cds.UPDATE>>)?number:Awaited<ReturnType<typeof cds.UPDATE>>');
+    });
+
+    it('does not treat SELECT as a write statement (would call the worker)', () => {
+        // With noWorker, a SELECT must reach the worker path; assert.fail inside
+        // noWorker proves SELECT is NOT short-circuited. Use a passing worker here.
+        const okWorker = () => ({ fields: { Books: [{ label: 'ID', kind: 'field', detail: 'cds.UUID' }] } });
+        const out = resolveTypeExpr(TS, 'SELECT ID FROM Books', undefined, true, '/proj', okWorker, logger);
+        assert.equal(out, '{ID:string}[]');
+    });
+});
 // ---------------------------------------------------------------------------
 
 describe('fieldTokenAtOffset', () => {
@@ -3709,6 +3867,13 @@ describe('tokenizeCql — unknown token', () => {
         const unknown = tokens.find((t) => t.kind === 'unknown');
         assert.ok(unknown, 'expected unknown token for #');
         assert.equal(unknown.value, '#');
+    });
+
+    it('tokenizes colon as punctuation (for SET/ENTRIES object forms)', () => {
+        const tokens = tokenizeCql('UPDATE Books SET { title: 1 }');
+        const colon = tokens.find((t) => t.value === ':');
+        assert.ok(colon, 'expected a colon token');
+        assert.equal(colon.kind, 'punctuation');
     });
 });
 

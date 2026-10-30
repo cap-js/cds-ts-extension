@@ -399,6 +399,30 @@ function resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatc
 }
 
 /**
+ * Builds the awaited result type expression for a write statement (UPDATE /
+ * INSERT / UPSERT / DELETE). Prefers the user's own `cds` typings via
+ * `ReturnType<typeof cds.X>`; when `cds` is untyped (`any`) it falls back to a
+ * concrete type using the `IfAny` idiom (`0 extends (1 & T)` is true only when
+ * `T` is `any`). The returned expression is the **awaited value** type; the
+ * caller applies the `Promise<…>` wrapping for the non-awaited case.
+ *
+ *   UPDATE / DELETE → fallback `number` (affected-row count)
+ *   INSERT / UPSERT → fallback `{ affected: number }` (CAP InsertResult accessor)
+ *
+ * @param {'UPDATE' | 'DELETE' | 'INSERT' | 'UPSERT'} kind
+ * @returns {string} the awaited value type expression
+ */
+function writeStatementValueType(kind) {
+    const fallback = kind === 'INSERT' || kind === 'UPSERT' ? '{affected:number}' : 'number';
+    // `Awaited<…>` unwraps the builder's thenable to its resolved value so the
+    // wrapping below (Promise<…> vs bare) is applied uniformly.
+    const real = `Awaited<ReturnType<typeof cds.${kind}>>`;
+    return `0 extends (1&${real})?${fallback}:${real}`;
+}
+
+const WRITE_STATEMENT_RE = /^\s*(UPDATE|INSERT|UPSERT|DELETE)\b/i;
+
+/**
  * Resolves the alias type expression (e.g. `{ID:number;title:string}[]` or its
  * `Promise<…>` form) for a single cds.ql query. Thin wrapper over
  * `resolveRowTypeBody` that applies the array/awaited wrapping. Returns null on a
@@ -413,6 +437,16 @@ function resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatc
  * @returns {string | null}
  */
 function resolveTypeExpr(ts, queryText, effectivePrefix, awaited, projectRoot, runBatchWorker, logger) {
+    // Write statements (UPDATE/INSERT/UPSERT/DELETE) don't return rows — their
+    // awaited result is a count / insert-result, derivable purely from `typeof
+    // cds` with no model probe. Short-circuit before touching the worker.
+    const write = WRITE_STATEMENT_RE.exec(queryText);
+    if (write) {
+        const kind = /** @type {'UPDATE' | 'DELETE' | 'INSERT' | 'UPSERT'} */ (/** @type {string} */ (write[1]).toUpperCase());
+        const value = writeStatementValueType(kind);
+        return awaited ? value : `Promise<${value}>`;
+    }
+
     const typeBody = resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatchWorker, logger);
     if (typeBody === null) return null;
 
@@ -614,6 +648,7 @@ module.exports = {
     collectCqlAssignments,
     buildTypeString,
     buildTypeBody,
+    resolveTypeExpr,
     fieldTokenAtOffset,
     resolveRowTypeBody,
     rewriteSnapshot,
