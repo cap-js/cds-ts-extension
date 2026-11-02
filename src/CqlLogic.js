@@ -35,7 +35,10 @@ const { csnEntryKind, csnText } = require('./csn');
 
 /**
  * A column in a CQL projection — flat (no expand) or nested (expand block).
- * @typedef {{ field: string, alias: string, expand?: ExpandColumn[] }} ExpandColumn
+ * For a function-call column (`max(ID) as hi`), `func` is the lowercased
+ * function name and `arg` is the single field argument (if any), used to infer
+ * the result type.
+ * @typedef {{ field: string, alias: string, expand?: ExpandColumn[], func?: string, arg?: string }} ExpandColumn
  */
 
 /** @typedef {{ UnknownEntity: 9001, UnknownSource: 9002, UnknownField: 9003, AmbiguousField: 9004 }} CqlDiagnosticCodeEnum */
@@ -201,7 +204,7 @@ function tokenizeCql(query) {
         }
 
         // Punctuation
-        if (/[,;()[\]{}]/.test(ch)) {
+        if (/[,;:()[\]{}]/.test(ch)) {
             tokens.push({
                 kind: 'punctuation',
                 value: ch,
@@ -295,6 +298,46 @@ function parseCqlColumns(queryText) {
  * @param {CqlToken[]} toks
  * @returns {ExpandColumn[] | null}
  */
+/**
+ * If the token at `toks[i]` opens a function-call argument list (a '('),
+ * returns the index just past the matching ')' and the single field argument
+ * (when the parens contain exactly one identifier, e.g. `max(ID)`). Otherwise
+ * returns `{ end: i, arg: undefined }`. Handles nested parens.
+ * @param {CqlToken[]} toks
+ * @param {number} i index of the '(' (or any token)
+ * @returns {{ end: number, arg: string | undefined }}
+ */
+function skipBalancedParens(toks, i) {
+    const open = /** @type {CqlToken | undefined} */ (toks[i]);
+    if (!open || open.kind !== 'punctuation' || open.value !== '(') return { end: i, arg: undefined };
+    let depth = 0;
+    let j = i;
+    /** @type {string[]} */
+    const idents = [];
+    while (j < toks.length) {
+        const t = /** @type {CqlToken} */ (toks[j]);
+        if (t.kind === 'punctuation' && t.value === '(') depth++;
+        else if (t.kind === 'punctuation' && t.value === ')') {
+            depth--;
+            if (depth === 0) {
+                // When the parens contain exactly one identifier token (e.g.
+                // `max(ID)` or `max(B.ID)`) we expose it as the argument so the
+                // result type can be inferred from that field. A `*`, multiple
+                // identifiers, or no identifier at all leaves arg undefined.
+                const arg = idents.length === 1 ? idents[0] : undefined;
+                return { end: j + 1, arg };
+            }
+        } else if (t.kind === 'identifier') idents.push(t.value);
+        j++;
+    }
+    return { end: j, arg: undefined }; // unbalanced — consume to end
+}
+
+/**
+ * Parse a comma-separated classic column list (SELECT a, b, c FROM …).
+ * @param {CqlToken[]} toks
+ * @returns {ExpandColumn[] | null}
+ */
 function parseClassicColumns(toks) {
     // Filter to non-whitespace/unknown (already filtered by caller, but be safe)
     const sig = toks.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
@@ -317,9 +360,24 @@ function parseClassicColumns(toks) {
             continue;
         }
 
-        const field = tok.value.includes('.') ? (tok.value.split('.').pop() ?? tok.value) : tok.value;
-        let alias = field;
+        const bareField = tok.value.includes('.') ? (tok.value.split('.').pop() ?? tok.value) : tok.value;
         i++;
+
+        // Function call: `fn(args)` — consume the argument span and name the
+        // column after the function (overridden by a trailing AS alias below).
+        // Record the function name and single field argument for type inference.
+        const field = bareField;
+        /** @type {string | undefined} */
+        let func;
+        /** @type {string | undefined} */
+        let arg;
+        if (i < sig.length && /** @type {CqlToken} */ (sig[i]).kind === 'punctuation' && /** @type {CqlToken} */ (sig[i]).value === '(') {
+            func = bareField.toLowerCase();
+            const r = skipBalancedParens(sig, i);
+            i = r.end;
+            arg = r.arg;
+        }
+        let alias = field;
 
         // AS alias only — implicit-alias detection is unreliable without comma boundaries
         if (i < sig.length && /** @type {CqlToken} */ (sig[i]).kind === 'keyword' && /** @type {CqlToken} */ (sig[i]).value.toUpperCase() === 'AS') {
@@ -329,7 +387,7 @@ function parseClassicColumns(toks) {
                 i++;
             }
         }
-        result.push({ field, alias });
+        result.push(func ? { field, alias, func, arg } : { field, alias });
     }
     return result.length > 0 ? result : null;
 }
@@ -374,6 +432,26 @@ function parseBraceBlock(toks, start) {
         const hasDot = tok.value.endsWith('.');
         let alias = field;
         i++;
+
+        // Function call: `fn(args)` — consume the argument span. A function
+        // column cannot be an expand and has no trailing dot, so handle it
+        // before the expand/AS logic. The column is named after the function
+        // unless a trailing AS alias overrides it below. Record func/arg for
+        // type inference.
+        if (!hasDot && i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'punctuation' && /** @type {CqlToken} */ (toks[i]).value === '(') {
+            const func = field.toLowerCase();
+            const r = skipBalancedParens(toks, i);
+            i = r.end;
+            if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'keyword' && /** @type {CqlToken} */ (toks[i]).value.toUpperCase() === 'AS') {
+                i++; // skip AS
+                if (i < toks.length && /** @type {CqlToken} */ (toks[i]).kind === 'identifier') {
+                    alias = /** @type {CqlToken} */ (toks[i]).value;
+                    i++;
+                }
+            }
+            result.push({ field, alias, func, arg: r.arg });
+            continue;
+        }
 
         // Check for expand: `field {`, `field.{` (inline expand), or `field as alias {`.
         // The tokenizer merges `identifier.` into a single identifier token ending with '.'.
@@ -807,18 +885,46 @@ function isToMany(el) {
 const isFromJoinKw = (t) => t?.kind === 'keyword' && /^(FROM|JOIN|INNER|LEFT|RIGHT|FULL|CROSS)$/i.test(t.value);
 
 /**
+ * Returns the set of valid field names for an artifact: its own elements plus
+ * the generated foreign-key columns for each managed association/composition
+ * (`<assoc>_<key>`, e.g. association `flight` with key `ID` → `flight_ID`).
+ * These FK columns are valid references but are not top-level elements in an
+ * unresolved CSN view.
+ * @param {CsnArtifact} artifact
+ * @returns {Set<string>}
+ */
+function elementNamesWithForeignKeys(artifact) {
+    const names = new Set(Object.keys(artifact.elements ?? {}));
+    for (const [name, el] of Object.entries(artifact.elements ?? {})) {
+        const keys = /** @type {Array<{ ref?: string[] }> | undefined} */ (/** @type {any} */ (el).keys);
+        if (!keys) continue;
+        for (const k of keys) {
+            const ref = k.ref;
+            if (ref && ref.length) names.add(`${name}_${ref.join('_')}`);
+        }
+    }
+    return names;
+}
+
+/**
  * @param {CsnDefs} defs
  * @param {string} name
  * @param {string | undefined} prefix
  * @returns {{ fqn: string, artifact: CsnArtifact } | null}
  */
 function resolveSource(defs, name, prefix) {
-    const key = prefix ? `${prefix}.${name}` : name;
+    // Draft shadow entities (`<Entity>.drafts`) are not materialised in the
+    // compiled CSN — they are generated at runtime by the drafts feature. Strip
+    // a trailing `.drafts` and resolve against the base entity, which carries
+    // the same element set.
+    const base = name.endsWith('.drafts') ? name.slice(0, -'.drafts'.length) : name;
+
+    const key = prefix ? `${prefix}.${base}` : base;
     const artifact = defs[key];
     if (artifact?.kind && SOURCE_KINDS.has(artifact.kind)) return { fqn: key, artifact };
     // Also try fully-qualified lookup when name already includes a dot
-    const byFqn = name.includes('.') ? defs[name] : undefined;
-    if (byFqn?.kind && SOURCE_KINDS.has(byFqn.kind)) return { fqn: name, artifact: byFqn };
+    const byFqn = base.includes('.') ? defs[base] : undefined;
+    if (byFqn?.kind && SOURCE_KINDS.has(byFqn.kind)) return { fqn: base, artifact: byFqn };
     return null;
 }
 
@@ -975,6 +1081,17 @@ function validateCqlQuery(query, defs, prefix) {
     const tokens = tokenizeCql(query);
     const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
 
+    // Write statements (UPDATE / INSERT / UPSERT) have no FROM clause, so they
+    // are validated by a dedicated path. DELETE has a FROM and flows through the
+    // SELECT-oriented logic below.
+    const head = significant[0];
+    if (head && head.kind === 'identifier') {
+        const kw = head.value.toUpperCase();
+        if (kw === 'UPDATE' || kw === 'INSERT' || kw === 'UPSERT') {
+            return validateWriteStatement(significant, defs, prefix);
+        }
+    }
+
     // Collect FROM/JOIN sources and validate them
     const fromEntries = collectFromSourceTokens(significant);
     const resolvedSources = [];
@@ -1007,7 +1124,13 @@ function validateCqlQuery(query, defs, prefix) {
         for (const name of names) elementCount.set(name, (elementCount.get(name) ?? 0) + 1);
     }
 
-    let depth = 0;
+    // Paren stack: each entry is 'args' (a function-call argument list, whose
+    // field arguments are still validated) or 'skip' (a subquery/grouping paren
+    // whose contents are ignored, e.g. `… IN (SELECT 1)`). Contents are skipped
+    // whenever any enclosing paren is a 'skip' paren.
+    /** @type {Array<'args' | 'skip'>} */
+    const parenStack = [];
+    const inSkippedParen = () => parenStack.includes('skip');
     let braceDepth = 0;
     // Stack of resolved entity artifacts — one per brace level; null = unresolvable
     const expandArtifactStack = [];
@@ -1015,17 +1138,30 @@ function validateCqlQuery(query, defs, prefix) {
     let afterOrderKeyword = false;
     let expectAlias = false;
     let lastIdentifier = null; // identifier before a potential '{'
+    let prevWasIdentifier = false; // previous significant token was an identifier (field or function-call candidate)
 
-    for (const tok of significant) {
+    for (let idx = 0; idx < significant.length; idx++) {
+        const tok = /** @type {CqlToken} */ (significant[idx]);
         if (tok.kind === 'punctuation' && tok.value === '(') {
-            depth++;
+            // A '(' immediately after a bare identifier in a column/predicate
+            // context is a function-call argument list (max(ID), count(x), …);
+            // its arguments are still validated. Anything else (subquery,
+            // grouping) is skipped wholesale.
+            const isFnArgs = prevWasIdentifier && (clause === 'select' || clause === 'where' || clause === 'order_by');
+            parenStack.push(isFnArgs ? 'args' : 'skip');
+            prevWasIdentifier = false;
             continue;
         }
         if (tok.kind === 'punctuation' && tok.value === ')') {
-            depth = Math.max(0, depth - 1);
+            parenStack.pop();
+            prevWasIdentifier = false;
             continue;
         }
-        if (depth > 0) continue;
+        prevWasIdentifier = false;
+        if (inSkippedParen()) continue;
+        // Inside a function-argument paren a lone '*' (e.g. count(*)) is not a
+        // field reference and must not be flagged.
+        if (parenStack.length > 0 && tok.kind === 'star') continue;
 
         // Brace handling for expand blocks
         if (tok.kind === 'punctuation' && tok.value === '{') {
@@ -1116,6 +1252,19 @@ function validateCqlQuery(query, defs, prefix) {
 
         lastIdentifier = tok.value;
 
+        // Any identifier here may be the name preceding a function-call '(' —
+        // mark it so a following '(' is treated as an argument list rather than
+        // a subquery/grouping paren.
+        prevWasIdentifier = true;
+
+        // Function call: an identifier immediately followed by '(' is a function
+        // name (max, count, sum, …), not a field. Don't validate it; the opening
+        // paren that follows becomes an 'args' paren whose arguments are checked.
+        const next = significant[idx + 1];
+        if (next && next.kind === 'punctuation' && next.value === '(') {
+            continue;
+        }
+
         if (clause === 'select' || clause === 'where' || clause === 'order_by') {
             // Inside an expand block — validate against the current expand context entity
             if (braceDepth > 0) {
@@ -1181,6 +1330,157 @@ function validateCqlQuery(query, defs, prefix) {
         }
     }
 
+    return errors;
+}
+
+/**
+ * Validates an UPDATE / INSERT / UPSERT statement: resolves the target entity
+ * and checks the field positions (SET targets + WHERE fields for UPDATE; the
+ * column list / ENTRIES keys for INSERT/UPSERT). Literal values (RHS of `=`,
+ * VALUES lists) are never validated. Tolerant of partial/mid-typing input.
+ * @param {CqlToken[]} significant tokens with whitespace/unknown already removed
+ * @param {CsnDefs} defs
+ * @param {string} [prefix]
+ * @returns {CqlDiagnostic[]}
+ */
+function validateWriteStatement(significant, defs, prefix) {
+    /** @type {CqlDiagnostic[]} */
+    const errors = [];
+    const kw = /** @type {CqlToken} */ (significant[0]).value.toUpperCase();
+    const isUpdate = kw === 'UPDATE';
+
+    // Locate the target entity token.
+    //   UPDATE <entity> …                → token at index 1
+    //   INSERT|UPSERT INTO <entity> …     → token after the INTO keyword
+    let entityIdx;
+    if (isUpdate) {
+        entityIdx = 1;
+    } else {
+        const intoIdx = significant.findIndex((t) => t.kind === 'keyword' && t.value.toUpperCase() === 'INTO');
+        entityIdx = intoIdx === -1 ? -1 : intoIdx + 1;
+    }
+    const entityToken = entityIdx >= 0 ? significant[entityIdx] : undefined;
+    if (!entityToken || entityToken.kind !== 'identifier') return errors; // partial input
+
+    const resolved = resolveSource(defs, entityToken.value, prefix);
+    if (!resolved) {
+        errors.push({
+            message: `Unknown entity or view '${entityToken.value}'`,
+            start: entityToken.start,
+            end: entityToken.end,
+            code: CqlDiagnosticCode.UnknownEntity,
+        });
+        return errors;
+    }
+    const elements = elementNamesWithForeignKeys(resolved.artifact);
+
+    /** Push an UnknownField diagnostic for `tok` unless its field exists. */
+    const checkField = (/** @type {CqlToken} */ tok) => {
+        // Qualified `alias.field` → validate the final segment (single source).
+        const field = tok.value.includes('.') ? (tok.value.split('.').pop() ?? tok.value) : tok.value;
+        const dot = tok.value.lastIndexOf('.');
+        if (!elements.has(field)) {
+            errors.push({
+                message: `Unknown field '${field}'`,
+                start: dot >= 0 ? tok.start + dot + 1 : tok.start,
+                end: tok.end,
+                code: CqlDiagnosticCode.UnknownField,
+            });
+        }
+    };
+
+    if (isUpdate) {
+        // Find SET … and WHERE … regions.
+        const setIdx = significant.findIndex((t) => t.kind === 'identifier' && t.value.toUpperCase() === 'SET');
+        const whereIdx = significant.findIndex((t) => t.kind === 'keyword' && t.value.toUpperCase() === 'WHERE');
+        const setEnd = whereIdx === -1 ? significant.length : whereIdx;
+
+        if (setIdx !== -1) {
+            const objectForm = significant[setIdx + 1]?.kind === 'punctuation' && significant[setIdx + 1]?.value === '{';
+            if (objectForm) {
+                // SET { field: value , field: value } — key is the identifier before each ':'
+                for (let i = setIdx + 2; i < setEnd; i++) {
+                    const t = /** @type {CqlToken} */ (significant[i]);
+                    const nxt = significant[i + 1];
+                    if (t.kind === 'identifier' && nxt && nxt.kind === 'punctuation' && nxt.value === ':') checkField(t);
+                }
+            } else {
+                // SET field = value [, field = value] — the field is the
+                // identifier at the start of each comma-separated assignment.
+                let atTarget = true;
+                for (let i = setIdx + 1; i < setEnd; i++) {
+                    const t = /** @type {CqlToken} */ (significant[i]);
+                    if (t.kind === 'punctuation' && t.value === ',') {
+                        atTarget = true;
+                        continue;
+                    }
+                    if (atTarget) {
+                        if (t.kind === 'identifier') checkField(t);
+                        atTarget = false; // only the first token of the assignment is the target
+                    }
+                }
+            }
+        }
+
+        // WHERE clause: validate identifier operands (the LHS/RHS of predicates),
+        // skipping keywords/operators/literals. A function call `fn(field)` keeps
+        // the field as a plain identifier operand, so no special handling needed.
+        if (whereIdx !== -1) {
+            for (let i = whereIdx + 1; i < significant.length; i++) {
+                const t = /** @type {CqlToken} */ (significant[i]);
+                if (t.kind !== 'identifier') continue;
+                // Skip function names (identifier immediately followed by '(').
+                const nxt = significant[i + 1];
+                if (nxt && nxt.kind === 'punctuation' && nxt.value === '(') continue;
+                // Skip SQL logical keywords that tokenize as identifiers are not a
+                // concern here (AND/OR/NOT/IN/IS/LIKE/BETWEEN are keywords).
+                checkField(t);
+            }
+        }
+        return errors;
+    }
+
+    // INSERT / UPSERT — validate column names only.
+    // Column list: `( c , c )` directly after the entity, or after a COLUMNS id.
+    // ENTRIES object: `{ c : v , c : v }` — keys are identifiers before ':'.
+    const entriesIdx = significant.findIndex((t) => t.kind === 'identifier' && t.value.toUpperCase() === 'ENTRIES');
+    const valuesIdx = significant.findIndex((t) => t.kind === 'identifier' && t.value.toUpperCase() === 'VALUES');
+
+    if (entriesIdx !== -1) {
+        const braceStart = entriesIdx + 1;
+        if (significant[braceStart]?.kind === 'punctuation' && significant[braceStart]?.value === '{') {
+            for (let i = braceStart + 1; i < significant.length; i++) {
+                const t = /** @type {CqlToken} */ (significant[i]);
+                if (t.kind === 'punctuation' && t.value === '}') break;
+                const nxt = significant[i + 1];
+                if (t.kind === 'identifier' && nxt && nxt.kind === 'punctuation' && nxt.value === ':') checkField(t);
+            }
+        }
+        return errors;
+    }
+
+    // Column-list form: the first '(' after the entity (and before VALUES) holds
+    // the column names. Any identifier inside that paren group is a column.
+    let openIdx = -1;
+    for (let i = entityIdx + 1; i < significant.length; i++) {
+        const t = /** @type {CqlToken} */ (significant[i]);
+        if (valuesIdx !== -1 && i >= valuesIdx) break; // don't descend into VALUES
+        if (t.kind === 'punctuation' && t.value === '(') {
+            openIdx = i;
+            break;
+        }
+    }
+    if (openIdx !== -1) {
+        let depth = 0;
+        for (let i = openIdx; i < significant.length; i++) {
+            const t = /** @type {CqlToken} */ (significant[i]);
+            if (t.kind === 'punctuation' && t.value === '(') depth++;
+            else if (t.kind === 'punctuation' && t.value === ')') {
+                depth--;
+                if (depth === 0) break;
+            } else if (t.kind === 'identifier') checkField(t);
+        }
+    }
     return errors;
 }
 

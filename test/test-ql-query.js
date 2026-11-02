@@ -17,6 +17,8 @@ const {
 /** @typedef {import('../src/CqlLogic').CqlSource} CqlSource */
 const {
     buildTypeString,
+    buildTypeBody,
+    resolveTypeExpr,
     collectCqlAssignments,
     extractTemplateText,
     fieldTokenAtOffset,
@@ -686,6 +688,192 @@ describe('validateCqlQuery', () => {
     it('ignores field references inside parenthesised subquery context', () => {
         // Parentheses increase depth; tokens inside must be skipped for validation
         assert.deepEqual(validateCqlQuery('SELECT ID FROM Books WHERE ID IN (SELECT 1)', model, 'Svc'), []);
+    });
+
+    it('does not flag an aggregate function name as an unknown field', () => {
+        // Regression: `max` is a function, not a field — must not be flagged.
+        assert.deepEqual(validateCqlQuery('SELECT max(ID) as ID FROM Books', model, 'Svc'), []);
+    });
+
+    it('accepts count(*) without flagging count or the star', () => {
+        assert.deepEqual(validateCqlQuery('SELECT count(*) as n FROM Books', model, 'Svc'), []);
+    });
+
+    it('still validates the field argument of a function call', () => {
+        const errs = validateCqlQuery('SELECT max(ghost) as x FROM Books', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.ok(errs[0].message.includes("Unknown field 'ghost'"), 'expected the argument to be flagged');
+        assert.equal('SELECT max(ghost) as x FROM Books'.slice(errs[0].start, errs[0].end), 'ghost');
+    });
+
+    it('accepts a function call alongside plain columns', () => {
+        assert.deepEqual(validateCqlQuery('SELECT title, max(ID) as mx FROM Books', model, 'Svc'), []);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Draft shadow entities (`<Entity>.drafts`) — not in the compiled CSN, so a
+// trailing `.drafts` is stripped and resolved against the base entity.
+// ---------------------------------------------------------------------------
+
+describe('draft entities (.drafts suffix)', () => {
+    const model = defs({
+        'Svc.Books': { ID: 'cds.UUID', title: 'cds.String' },
+    });
+    const fqnModel = {
+        'sap.capire.bookshop.Books': {
+            kind: 'entity',
+            elements: { ID: { type: 'cds.UUID' }, title: { type: 'cds.String' } },
+        },
+    };
+
+    it('resolves a prefixed draft entity to its base (no diagnostics)', () => {
+        assert.deepEqual(validateCqlQuery('SELECT ID FROM Books.drafts', model, 'Svc'), []);
+    });
+
+    it('resolves a fully-qualified draft entity to its base (no diagnostics)', () => {
+        assert.deepEqual(validateCqlQuery('SELECT ID FROM sap.capire.bookshop.Books.drafts', fqnModel, undefined), []);
+    });
+
+    it('validates fields against the base entity for a draft query', () => {
+        const errs = validateCqlQuery('SELECT ghost FROM Books.drafts', model, 'Svc');
+        assert.ok(
+            errs.find((e) => e.message.includes("Unknown field 'ghost'")),
+            'expected the bad field to be flagged against the base entity',
+        );
+    });
+
+    it('still flags a genuinely unknown entity carrying a .drafts suffix', () => {
+        const errs = validateCqlQuery('SELECT ID FROM Nope.drafts', model, 'Svc');
+        assert.ok(
+            errs.find((e) => e.message.includes('Unknown entity')),
+            'expected unknown-entity diagnostic',
+        );
+    });
+
+    it('suggests base-entity fields inside a draft-entity query', () => {
+        const { query, cursor } = withCursor('SELECT | FROM Books.drafts');
+        const items = getSuggestions(query, cursor, model, 'Svc');
+        includesAll(
+            items.map((i) => i.label),
+            ['ID', 'title'],
+        );
+    });
+});
+
+// ---------------------------------------------------------------------------
+// validateCqlQuery — write statements (UPDATE / INSERT / UPSERT)
+// ---------------------------------------------------------------------------
+
+describe('validateCqlQuery — write statements', () => {
+    const model = defs({
+        'Svc.Books': { ID: 'cds.UUID', title: 'cds.String', stock: 'cds.Integer' },
+    });
+
+    // --- UPDATE ---
+    it('accepts a valid UPDATE with SET and WHERE', () => {
+        assert.deepEqual(validateCqlQuery("UPDATE Books SET title = 'x' WHERE ID = 1", model, 'Svc'), []);
+    });
+
+    it('reports unknown entity on UPDATE', () => {
+        const errs = validateCqlQuery('UPDATE Nope SET title = 1', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.equal(errs[0].code, CqlDiagnosticCode.UnknownEntity);
+        assert.ok(errs[0].message.includes('Nope'));
+    });
+
+    it('reports unknown field in SET target', () => {
+        const q = 'UPDATE Books SET bogus = 1';
+        const errs = validateCqlQuery(q, model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.equal(errs[0].code, CqlDiagnosticCode.UnknownField);
+        assert.equal(q.slice(errs[0].start, errs[0].end), 'bogus');
+    });
+
+    it('reports unknown field in WHERE clause', () => {
+        const errs = validateCqlQuery('UPDATE Books SET title = 1 WHERE bogus = 2', model, 'Svc');
+        assert.ok(errs.find((e) => e.message.includes("Unknown field 'bogus'")));
+    });
+
+    it('does not flag SET right-hand-side values', () => {
+        // `stock` is a valid field, but here it is used as a literal-ish RHS; the
+        // target `title` is valid, so no diagnostics.
+        assert.deepEqual(validateCqlQuery('UPDATE Books SET title = 1', model, 'Svc'), []);
+    });
+
+    it('accepts the SET object form', () => {
+        assert.deepEqual(validateCqlQuery('UPDATE Books SET { title: 1 }', model, 'Svc'), []);
+    });
+
+    it('reports unknown field in SET object form', () => {
+        const errs = validateCqlQuery('UPDATE Books SET { bogus: 1 }', model, 'Svc');
+        assert.ok(errs.find((e) => e.message.includes("Unknown field 'bogus'")));
+    });
+
+    it('validates each target in a multi-assignment SET', () => {
+        const errs = validateCqlQuery('UPDATE Books SET title = 1, bogus = 2', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.ok(errs[0].message.includes("Unknown field 'bogus'"));
+    });
+
+    it('resolves a .drafts UPDATE target to the base entity', () => {
+        assert.deepEqual(validateCqlQuery('UPDATE Books.drafts SET title = 1', model, 'Svc'), []);
+    });
+
+    it('accepts a generated foreign-key column in WHERE (managed association)', () => {
+        // `author` association with key `ID` generates a valid `author_ID` FK column.
+        const assocModel = {
+            'Svc.Books': {
+                kind: 'entity',
+                elements: {
+                    ID: { type: 'cds.UUID' },
+                    author: { type: 'cds.Association', target: 'Svc.Authors', keys: [{ ref: ['ID'] }] },
+                },
+            },
+            'Svc.Authors': { kind: 'entity', elements: { ID: { type: 'cds.UUID' } } },
+        };
+        assert.deepEqual(validateCqlQuery('UPDATE Books SET ID = 1 WHERE author_ID = 2', assocModel, 'Svc'), []);
+    });
+
+    // --- INSERT / UPSERT ---
+    it('accepts a valid INSERT column list', () => {
+        assert.deepEqual(validateCqlQuery("INSERT INTO Books (ID, title) VALUES (1, 'x')", model, 'Svc'), []);
+    });
+
+    it('reports unknown column in INSERT column list', () => {
+        const errs = validateCqlQuery('INSERT INTO Books (ID, bogus) VALUES (1, 2)', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.ok(errs[0].message.includes("Unknown field 'bogus'"));
+    });
+
+    it('accepts the COLUMNS (...) form', () => {
+        assert.deepEqual(validateCqlQuery('INSERT INTO Books COLUMNS (ID, title) VALUES (1, 2)', model, 'Svc'), []);
+    });
+
+    it('accepts the ENTRIES object form and flags bad keys', () => {
+        assert.deepEqual(validateCqlQuery('INSERT INTO Books ENTRIES { ID: 1, title: 2 }', model, 'Svc'), []);
+        const errs = validateCqlQuery('INSERT INTO Books ENTRIES { bogus: 1 }', model, 'Svc');
+        assert.ok(errs.find((e) => e.message.includes("Unknown field 'bogus'")));
+    });
+
+    it('reports unknown entity on INSERT/UPSERT', () => {
+        assert.ok(validateCqlQuery('INSERT INTO Nope (ID) VALUES (1)', model, 'Svc').find((e) => e.code === CqlDiagnosticCode.UnknownEntity));
+        assert.ok(validateCqlQuery('UPSERT INTO Nope ENTRIES { ID: 1 }', model, 'Svc').find((e) => e.code === CqlDiagnosticCode.UnknownEntity));
+    });
+
+    it('never flags VALUES list contents as fields', () => {
+        // `title` appears only inside VALUES, not the column list — must not flag.
+        assert.deepEqual(validateCqlQuery('INSERT INTO Books (ID) VALUES (title)', model, 'Svc'), []);
+    });
+
+    // --- regression guards ---
+    it('leaves SELECT aggregate validation unchanged', () => {
+        assert.deepEqual(validateCqlQuery('SELECT max(ID) as ID FROM Books', model, 'Svc'), []);
+    });
+
+    it('leaves DELETE validation unchanged', () => {
+        const errs = validateCqlQuery('DELETE FROM Books WHERE bogus = 1', model, 'Svc');
+        assert.ok(errs.find((e) => e.message.includes("Unknown field 'bogus'")));
     });
 });
 
@@ -3178,7 +3366,96 @@ describe('buildTypeString', () => {
 });
 
 // ---------------------------------------------------------------------------
-// fieldTokenAtOffset — edge cases
+// buildTypeBody — function-call (aggregate) result types
+// ---------------------------------------------------------------------------
+
+describe('buildTypeBody — aggregate functions', () => {
+    // fieldMap mirrors what the worker probe returns for an entity's elements
+    const fieldMap = new Map([
+        ['ID', { label: 'ID', kind: 'field', detail: 'cds.Integer' }],
+        ['title', { label: 'title', kind: 'field', detail: 'cds.String' }],
+        ['stock', { label: 'stock', kind: 'field', detail: 'cds.Integer' }],
+    ]);
+
+    it('infers number for count(*)', () => {
+        const cols = parseCqlColumns('SELECT count(*) as n FROM Books');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'n:number');
+    });
+
+    it('infers the argument type for max/min/sum/avg', () => {
+        const cols = parseCqlColumns('SELECT max(ID) as hi, avg(stock) as a, min(title) as lo FROM Books');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'hi:number;a:number;lo:string');
+    });
+
+    it('infers the argument type for a qualified aggregate argument', () => {
+        // arg is `B.ID`; fieldMap is keyed by the bare label `ID`.
+        const cols = parseCqlColumns('SELECT max(B.ID) as hi FROM Books AS B');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'hi:number');
+    });
+
+    it('falls back to unknown for an unrecognised function', () => {
+        const cols = parseCqlColumns('SELECT weird(ID) as w FROM Books');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'w:unknown');
+    });
+
+    it('falls back to unknown when the aggregate argument is unresolvable', () => {
+        const cols = parseCqlColumns('SELECT max(ghost) as x FROM Books');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'x:unknown');
+    });
+
+    it('mixes aggregate and plain columns', () => {
+        const cols = parseCqlColumns('SELECT title, count(*) as n FROM Books');
+        assert.equal(buildTypeBody(cols, fieldMap, {}), 'title:string;n:number');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// resolveTypeExpr — write-statement result types (UPDATE/INSERT/UPSERT/DELETE)
+// ---------------------------------------------------------------------------
+
+describe('resolveTypeExpr — write statements', () => {
+    // A worker stub that fails the test if called: write statements must be typed
+    // purely from `typeof cds`, with no model probe.
+    const noWorker = () => assert.fail('runBatchWorker must not be called for a write statement');
+    const logger = { info() {}, error() {} };
+    const expr = (q, awaited) => resolveTypeExpr(TS, q, undefined, awaited, '/proj', noWorker, logger);
+
+    it('UPDATE (awaited) → number', () => {
+        assert.equal(expr('UPDATE Books SET stock = 1 WHERE ID = 2', true), 'number');
+    });
+
+    it('UPDATE (non-awaited) → Promise<number>', () => {
+        assert.equal(expr('UPDATE Books SET stock = 1', false), 'Promise<number>');
+    });
+
+    it('DELETE (awaited) → number', () => {
+        assert.equal(expr('DELETE FROM Books WHERE ID = 1', true), 'number');
+    });
+
+    it('INSERT (awaited) → { affected: number }', () => {
+        assert.equal(expr('INSERT INTO Books (ID) VALUES (1)', true), '{affected:number}');
+    });
+
+    it('UPSERT (awaited) → { affected: number }', () => {
+        assert.equal(expr('UPSERT INTO Books ENTRIES { ID: 1 }', true), '{affected:number}');
+    });
+
+    it('INSERT (non-awaited) → Promise<{ affected: number }>', () => {
+        assert.equal(expr('INSERT INTO Books (ID) VALUES (1)', false), 'Promise<{affected:number}>');
+    });
+
+    it('is case-insensitive and tolerates leading whitespace', () => {
+        assert.equal(expr('  update Books SET stock = 1', true), 'number');
+    });
+
+    it('does not treat SELECT as a write statement (would call the worker)', () => {
+        // With noWorker, a SELECT must reach the worker path; assert.fail inside
+        // noWorker proves SELECT is NOT short-circuited. Use a passing worker here.
+        const okWorker = () => ({ fields: { Books: [{ label: 'ID', kind: 'field', detail: 'cds.UUID' }] } });
+        const out = resolveTypeExpr(TS, 'SELECT ID FROM Books', undefined, true, '/proj', okWorker, logger);
+        assert.equal(out, '{ID:string}[]');
+    });
+});
 // ---------------------------------------------------------------------------
 
 describe('fieldTokenAtOffset', () => {
@@ -3594,6 +3871,13 @@ describe('tokenizeCql — unknown token', () => {
         const unknown = tokens.find((t) => t.kind === 'unknown');
         assert.ok(unknown, 'expected unknown token for #');
         assert.equal(unknown.value, '#');
+    });
+
+    it('tokenizes colon as punctuation (for SET/ENTRIES object forms)', () => {
+        const tokens = tokenizeCql('UPDATE Books SET { title: 1 }');
+        const colon = tokens.find((t) => t.value === ':');
+        assert.ok(colon, 'expected a colon token');
+        assert.equal(colon.kind, 'punctuation');
     });
 });
 
@@ -4159,6 +4443,48 @@ describe('parseCqlColumns', () => {
         // Unterminated block with only a comma — hits end-of-tokens path with empty result
         const result = parseCqlColumns('SELECT FROM Books { ,');
         assert.equal(result, null);
+    });
+
+    it('parses an aggregate function column with AS alias as a single column', () => {
+        const result = parseCqlColumns('SELECT max(ID) as ID FROM Books');
+        assert.deepEqual(result, [{ field: 'max', alias: 'ID', func: 'max', arg: 'ID' }]);
+    });
+
+    it('parses count(*) with alias as a single column', () => {
+        const result = parseCqlColumns('SELECT count(*) as n FROM Books');
+        assert.deepEqual(result, [{ field: 'count', alias: 'n', func: 'count', arg: undefined }]);
+    });
+
+    it('names an unaliased function column after the function', () => {
+        const result = parseCqlColumns('SELECT max(ID) FROM Books');
+        assert.deepEqual(result, [{ field: 'max', alias: 'max', func: 'max', arg: 'ID' }]);
+    });
+
+    it('parses a multi-argument function column', () => {
+        const result = parseCqlColumns('SELECT round(price, 2) as p FROM Books');
+        assert.deepEqual(result, [{ field: 'round', alias: 'p', func: 'round', arg: 'price' }]);
+    });
+
+    it('parses a function column mixed with plain columns', () => {
+        const result = parseCqlColumns('SELECT title, max(ID) as mx FROM Books');
+        assert.deepEqual(result, [
+            { field: 'title', alias: 'title' },
+            { field: 'max', alias: 'mx', func: 'max', arg: 'ID' },
+        ]);
+    });
+
+    it('parses a function column inside a postfix brace block', () => {
+        const result = parseCqlColumns('SELECT FROM Books { ID, max(stock) as m }');
+        assert.deepEqual(result, [
+            { field: 'ID', alias: 'ID' },
+            { field: 'max', alias: 'm', func: 'max', arg: 'stock' },
+        ]);
+    });
+
+    it('tolerates an unbalanced function paren (consumes to end)', () => {
+        // Missing ')' — skipBalancedParens consumes the rest; no crash, one column.
+        const result = parseCqlColumns('SELECT max(ID FROM Books');
+        assert.deepEqual(result, [{ field: 'max', alias: 'max', func: 'max', arg: undefined }]);
     });
 });
 

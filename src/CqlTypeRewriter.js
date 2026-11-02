@@ -235,6 +235,29 @@ function padWithNewlines(cast, sourceText, start, end) {
 }
 
 /**
+ * Infers the TS type of a function-call result column.
+ *   - `count` → `number` (row/value count).
+ *   - arg-preserving aggregates (`max`/`min`/`sum`/`avg`) → the TS type of the
+ *     single field argument, resolved via the field map.
+ *   - anything else (unknown function, `*`, multi-arg, or unresolvable arg) →
+ *     `unknown`.
+ * @param {string} func lowercased function name
+ * @param {string | undefined} arg single field argument name, if any
+ * @param {Map<string, CompletionEntry>} fieldMap
+ * @returns {string}
+ */
+function aggregateResultType(func, arg, fieldMap) {
+    if (func === 'count') return 'number';
+    if (func === 'max' || func === 'min' || func === 'sum' || func === 'avg') {
+        // The arg may be qualified (`B.ID`) while fieldMap is keyed by bare
+        // labels (`ID`) — fall back to the final path segment.
+        const entry = arg ? (fieldMap.get(arg) ?? fieldMap.get(arg.split('.').pop() ?? arg)) : undefined;
+        if (entry && !entry.target) return cdsTypeToTs(entry.detail);
+    }
+    return 'unknown';
+}
+
+/**
  * Recursively builds a TS object-type body string from a parsed column tree.
  * cols=null means SELECT * at this level → use all scalar fields from fieldMap.
  * Association columns with an expand sub-tree recurse into batchFields[target].
@@ -260,6 +283,11 @@ function buildTypeBody(cols, fieldMap, batchFields) {
                 const subMap = new Map((subFields ?? []).map((f) => [f.label, f]));
                 const subBody = buildTypeBody(col.expand.length === 0 ? null : col.expand, subMap, batchFields);
                 entries.push(`${col.alias}:{${subBody}}${assocEntry?.toMany ? '[]' : ''}`);
+            } else if (col.func) {
+                // Function-call column: infer the result type. `count` is always
+                // numeric; arg-preserving aggregates (max/min/sum/avg) take the
+                // type of their single field argument; anything else is unknown.
+                entries.push(`${col.alias}:${aggregateResultType(col.func, col.arg, fieldMap)}`);
             } else {
                 const entry = fieldMap.get(col.field);
                 if (entry) {
@@ -371,6 +399,26 @@ function resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatc
 }
 
 /**
+ * Builds the awaited result-value type for a write statement. CAP resolves an
+ * awaited write query to an affected-row count (`UPDATE`/`DELETE`) or an insert
+ * result (`INSERT`/`UPSERT`). We emit fixed concrete types rather than deriving
+ * from `typeof cds` — `@sap/cds` is usually untyped, and an `any`-fallback guard
+ * proved too brittle (it leaks back to `any`). The returned expression is the
+ * **awaited value** type; the caller wraps it in `Promise<…>` when not awaited.
+ *
+ *   UPDATE / DELETE → `number` (affected-row count)
+ *   INSERT / UPSERT → `{ affected: number }` (CAP InsertResult accessor)
+ *
+ * @param {'UPDATE' | 'DELETE' | 'INSERT' | 'UPSERT'} kind
+ * @returns {string} the awaited value type expression
+ */
+function writeStatementValueType(kind) {
+    return kind === 'INSERT' || kind === 'UPSERT' ? '{affected:number}' : 'number';
+}
+
+const WRITE_STATEMENT_RE = /^\s*(UPDATE|INSERT|UPSERT|DELETE)\b/i;
+
+/**
  * Resolves the alias type expression (e.g. `{ID:number;title:string}[]` or its
  * `Promise<…>` form) for a single cds.ql query. Thin wrapper over
  * `resolveRowTypeBody` that applies the array/awaited wrapping. Returns null on a
@@ -385,6 +433,16 @@ function resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatc
  * @returns {string | null}
  */
 function resolveTypeExpr(ts, queryText, effectivePrefix, awaited, projectRoot, runBatchWorker, logger) {
+    // Write statements (UPDATE/INSERT/UPSERT/DELETE) don't return rows — their
+    // awaited result is a count / insert-result, derivable purely from `typeof
+    // cds` with no model probe. Short-circuit before touching the worker.
+    const write = WRITE_STATEMENT_RE.exec(queryText);
+    if (write) {
+        const kind = /** @type {'UPDATE' | 'DELETE' | 'INSERT' | 'UPSERT'} */ (/** @type {string} */ (write[1]).toUpperCase());
+        const value = writeStatementValueType(kind);
+        return awaited ? value : `Promise<${value}>`;
+    }
+
     const typeBody = resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatchWorker, logger);
     if (typeBody === null) return null;
 
@@ -585,6 +643,8 @@ module.exports = {
     resolveToCdsQuery,
     collectCqlAssignments,
     buildTypeString,
+    buildTypeBody,
+    resolveTypeExpr,
     fieldTokenAtOffset,
     resolveRowTypeBody,
     rewriteSnapshot,
