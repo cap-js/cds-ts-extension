@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Awaited result-type inference for write statements: `const n = await cds.ql\`UPDATE …\`` now infers a concrete type instead of `any` — `number` for `UPDATE`/`DELETE` (affected-row count) and `{ affected: number }` for `INSERT`/`UPSERT` (the CAP `InsertResult` accessor). The type is fixed (not derived from `@sap/cds` typings), so it needs no CDS model probe and is unaffected by whether the project ships cds type declarations.
 
 ### Changed
+- The tokenizer now treats `:` as punctuation (previously it was emitted as an `unknown` token and discarded). This preserves the key/value delimiter in object-literal query forms such as `` cds.ql`UPDATE Books SET { title: ... }` `` and `ENTRIES { ID: ... }`, enabling their field/key validation.
 
 ### Deprecated
 
