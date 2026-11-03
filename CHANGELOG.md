@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - The tokenizer now treats `:` as punctuation (previously it was emitted as an `unknown` token and discarded). This preserves the key/value delimiter in object-literal query forms such as `` cds.ql`UPDATE Books SET { title: ... }` `` and `ENTRIES { ID: ... }`, enabling their field/key validation.
+- Split the monolithic `src/CqlLogic.js` into a self-contained `src/cql/` core along its dependency layers (`lexer`, `parser`, `cursor-analysis`, `csn-resolve`, `endpoints`, `diagnostic-codes`, `types.d.ts`). `CqlLogic.js` is now a thin re-export barrel preserving the historical import surface, so consumers and tests are unchanged. No behavior change.
 
 ### Deprecated
 
