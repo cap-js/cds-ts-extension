@@ -195,7 +195,8 @@ vscode.workspace.onDidChangeConfiguration(e => {
 | `CqlHover.ts` | `getCqlHover` — Case 1 (field/entity inside template), Case 2 (result variable and property access on result), Case 3 (binding elements destructured from array) |
 | `CqlDiagnostics.ts` | `getCqlDiagnostics` |
 | `CqlTypeRewriter.ts` | `collectCqlAssignments`, `rewriteSnapshot` (accepts `{ typeExprCache, cacheOnly }` for synchronous cache-only rewrites), `resolveTypeExpr`, `placeCast` |
-| `CqlLogic.ts` | Pure CQL tokenizer, clause analysis, `getSuggestions`, `validateCqlQuery`, `getTokenContext`, `parseCqlColumns`, `followAssocPath` |
+| `CqlLogic.ts` | Re-export barrel for the CQL core (`tokenizeCql`, `parseCqlColumns`, `getTokenContext`, `getCursorClause`, `extractSourceRelations`, `cdsTypeToTs`, `resolveBaseType`, `getSuggestions`, `validateCqlQuery`, `CQL_KEYWORDS`, `CqlDiagnosticCode`). Implementation lives in `cql/` (below) — preserves the historical import surface. |
+| `cql/` | Self-contained CQL core (no LSP/external deps): `lexer.ts` (`tokenizeCql`, `CQL_KEYWORDS`), `parser.ts` (column/expand parsing), `cursor-analysis.ts` (clause/token context, source extraction), `csn-resolve.ts` (CDS→TS type + source/association resolution), `endpoints.ts` (`getSuggestions`, `validateCqlQuery`), `diagnostic-codes.ts` (`CqlDiagnosticCode`), `types.ts` (shared `@typedef`s). |
 | `TsAstHelpers.ts` | Shared TypeScript AST predicates/walkers (`isCdsQlInit`, `findAncestor`, `unwrapAwait`, …) |
 | `ServiceAnnotation.ts` | `// @cds-service` comment reader |
 | `csn.ts` | Minimal CSN (`@sap/cds` reflected model) type shims — `CsnArtifact`, `CsnElement`, `CsnDefs`, plus `csnText`/`csnEntryKind`. Temporary until `@sap/cds` ships official CSN types. |
@@ -219,7 +220,7 @@ Run all suites:
 ```bash
 npm test
 # or individually:
-node -r tsx/cjs --test test/test-ql-query.ts
+node --test test/test-ql-query.js
 ```
 
 Check coverage (Node's built-in `--experimental-test-coverage`, with the
