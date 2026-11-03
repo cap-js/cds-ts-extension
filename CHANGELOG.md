@@ -28,5 +28,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - Eliminated false-positive `Unknown field` diagnostics on aggregate/scalar function names (e.g. `max`, `count`) used in SELECT columns.
 - Eliminated false-positive `Unknown entity or view` diagnostics on draft shadow entities (`<Entity>.drafts`).
+- Inline-dot expands (`` cds.ql`SELECT from Books { author.{ name } }` ``) now resolve correctly for completions and diagnostics at any nesting depth. Previously the association head (`author.`) retained its trailing dot, so completions inside the block returned nothing and the head itself was mis-flagged as an `Unknown field`.
 
 ### Security
