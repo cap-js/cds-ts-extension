@@ -3271,8 +3271,17 @@ describe('cdsTypeToTs — type mapping', () => {
     it('maps Integer to number', () => {
         assert.equal(cdsTypeToTs('cds.Integer'), 'number');
     });
-    it('maps Decimal to number', () => {
-        assert.equal(cdsTypeToTs('cds.Decimal'), 'number');
+    it('maps Decimal to the ieee754compatible union (string | number)', () => {
+        assert.equal(cdsTypeToTs('cds.Decimal'), 'string | number');
+        assert.equal(cdsTypeToTs('cds.DecimalFloat'), 'string | number');
+    });
+    it('maps Int64 family to the ieee754compatible union (string | number)', () => {
+        assert.equal(cdsTypeToTs('cds.Int64'), 'string | number');
+        assert.equal(cdsTypeToTs('cds.Integer64'), 'string | number');
+    });
+    it('maps small/32-bit integers to number', () => {
+        assert.equal(cdsTypeToTs('cds.Int16'), 'number');
+        assert.equal(cdsTypeToTs('cds.Int32'), 'number');
     });
     it('maps Double to number', () => {
         assert.equal(cdsTypeToTs('cds.Double'), 'number');

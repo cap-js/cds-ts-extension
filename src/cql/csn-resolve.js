@@ -34,16 +34,23 @@ function cdsTypeToTs(typeName) {
             return 'boolean';
         case 'Integer':
         case 'Integer16':
-        case 'Integer32':
-        case 'Integer64':
         case 'Int16':
+        case 'Integer32':
         case 'Int32':
-        case 'Int64':
-        case 'Decimal':
-        case 'DecimalFloat':
         case 'Double':
         case 'Float':
             return 'number';
+        // Int64 and Decimal families are serialized as strings by CAP's default
+        // `ieee754compatible` feature (and the OData wire format) to preserve
+        // precision beyond the IEEE-754 double range, but are plain numbers when
+        // that feature is off. The static type therefore cannot be a single
+        // branch — it is a union the caller must handle. Confirmed against the
+        // runtime in test/runtime (Int64/Decimal -> string under the cds-10 default).
+        case 'Integer64':
+        case 'Int64':
+        case 'Decimal':
+        case 'DecimalFloat':
+            return 'string | number';
         default:
             return 'unknown';
     }
