@@ -4519,6 +4519,14 @@ describe('validateCqlQuery — expand blocks', () => {
                 elements: {
                     street: { type: 'cds.String' },
                     city: { type: 'cds.String' },
+                    country: { type: 'cds.Association', target: 'Svc.Countries' },
+                },
+            },
+            'Svc.Countries': {
+                kind: 'entity',
+                elements: {
+                    name: { type: 'cds.String' },
+                    code: { type: 'cds.String' },
                 },
             },
         };
@@ -4561,6 +4569,33 @@ describe('validateCqlQuery — expand blocks', () => {
         // Validation completes without throwing; result may contain errors for the anonymous block
         assert.ok(Array.isArray(errs));
     });
+
+    // Inline-dot expand (`author.{ … }`) — the association head carries a trailing dot.
+    it('accepts valid inline-dot expand', () => {
+        assert.deepEqual(validateCqlQuery('SELECT FROM Books { ID, author.{ name } }', expandDefs(), 'Svc'), []);
+    });
+
+    it('reports unknown field inside inline-dot expand', () => {
+        const errs = validateCqlQuery('SELECT FROM Books { author.{ ghost } }', expandDefs(), 'Svc');
+        assert.equal(errs.length, 1);
+        assert.ok(errs[0].message.includes('ghost'));
+    });
+
+    it('does not flag the inline-dot association head as an unknown field', () => {
+        // `author.` must not itself be reported as `Unknown field 'author.'`.
+        const errs = validateCqlQuery('SELECT FROM Books { author.{ name } }', expandDefs(), 'Svc');
+        assert.ok(!errs.some((e) => e.message.includes('author')), `author. must not be flagged, got: ${JSON.stringify(errs)}`);
+    });
+
+    it('accepts valid nested inline-dot expand', () => {
+        assert.deepEqual(validateCqlQuery('SELECT FROM Books { author.{ name, address.{ street } } }', expandDefs(), 'Svc'), []);
+    });
+
+    it('reports unknown field in a depth-3 expand', () => {
+        const errs = validateCqlQuery('SELECT FROM Books { author { address { country { ghost } } } }', expandDefs(), 'Svc');
+        assert.equal(errs.length, 1);
+        assert.ok(errs[0].message.includes('ghost'), `expected ghost flagged, got: ${JSON.stringify(errs)}`);
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -4594,6 +4629,14 @@ describe('getSuggestions — expand cursor', () => {
                 elements: {
                     street: { type: 'cds.String' },
                     city: { type: 'cds.String' },
+                    country: { type: 'cds.Association', target: 'Svc.Countries' },
+                },
+            },
+            'Svc.Countries': {
+                kind: 'entity',
+                elements: {
+                    name: { type: 'cds.String' },
+                    code: { type: 'cds.String' },
                 },
             },
         };
@@ -4653,5 +4696,32 @@ describe('getSuggestions — expand cursor', () => {
         const q = 'SELECT FROM Books { ID } X';
         const items = getSuggestions(q, q.length, defs, 'Svc');
         assert.ok(Array.isArray(items));
+    });
+
+    it('suggests nested target fields in depth-3 expand', () => {
+        const q = 'SELECT FROM Books { author { address { country { ';
+        const items = getSuggestions(q, q.length, expandDefs(), 'Svc');
+        const labels = items.map((i) => i.label);
+        assert.ok(labels.includes('name'), `expected Countries.name in [${labels.join(',')}]`);
+        assert.ok(labels.includes('code'), `expected Countries.code in [${labels.join(',')}]`);
+        assert.ok(!labels.includes('street'), 'did not expect Addresses.street at depth 3');
+    });
+
+    it('suggests target entity fields inside an inline-dot expand', () => {
+        const q = 'SELECT FROM Books { author.{ ';
+        const items = getSuggestions(q, q.length, expandDefs(), 'Svc');
+        const labels = items.map((i) => i.label);
+        assert.ok(labels.includes('name'), `expected Authors.name in [${labels.join(',')}]`);
+        assert.ok(labels.includes('address'), `expected Authors.address in [${labels.join(',')}]`);
+        assert.ok(!labels.includes('title'), 'did not expect Books.title inside author expand');
+    });
+
+    it('suggests nested target fields in a double-nested inline-dot expand', () => {
+        const q = 'SELECT FROM Books { author.{ address.{ ';
+        const items = getSuggestions(q, q.length, expandDefs(), 'Svc');
+        const labels = items.map((i) => i.label);
+        assert.ok(labels.includes('street'), `expected Addresses.street in [${labels.join(',')}]`);
+        assert.ok(labels.includes('city'), `expected Addresses.city in [${labels.join(',')}]`);
+        assert.ok(!labels.includes('name'), 'did not expect Authors.name at inline-dot depth 2');
     });
 });

@@ -564,6 +564,15 @@ function getTokenContext(query, cursorOffset, defs, prefix) {
 const isNonNull = (/** @type {unknown} */ x) => x !== null;
 
 /**
+ * Strips a single trailing '.' from an inline-dot expand head (`author.` → `author`).
+ * The tokenizer emits the association before an inline-dot expand (`author.{ … }`) as one
+ * identifier token with a trailing dot; mirrors the stripping `parseBraceBlock` already does.
+ * @param {string} s
+ * @returns {string}
+ */
+const stripTrailingDot = (s) => (s.endsWith('.') ? s.slice(0, -1) : s);
+
+/**
  * @param {CqlToken[]} tokens
  * @param {number} cursorOffset
  * @returns {CqlClause}
@@ -715,7 +724,7 @@ function getCursorClause(tokens, cursorOffset) {
                 expectColumnAlias = false;
                 continue;
             }
-            lastIdentifier = tok.value;
+            lastIdentifier = stripTrailingDot(tok.value);
             if (expectAlias) {
                 fromSources.push({ entity: pendingEntity, ref: tok.value });
                 pendingEntity = null;
@@ -1246,11 +1255,11 @@ function validateCqlQuery(query, defs, prefix) {
         }
         if (expectAlias) {
             expectAlias = false;
-            lastIdentifier = tok.value;
+            lastIdentifier = stripTrailingDot(tok.value);
             continue;
         }
 
-        lastIdentifier = tok.value;
+        lastIdentifier = stripTrailingDot(tok.value);
 
         // Any identifier here may be the name preceding a function-call '(' —
         // mark it so a following '(' is treated as an argument list rather than
@@ -1262,6 +1271,14 @@ function validateCqlQuery(query, defs, prefix) {
         // paren that follows becomes an 'args' paren whose arguments are checked.
         const next = significant[idx + 1];
         if (next && next.kind === 'punctuation' && next.value === '(') {
+            continue;
+        }
+
+        // Inline-dot expand head (`author.{ … }`): the identifier carries a trailing
+        // dot and is immediately followed by '{'. It is an association being opened,
+        // not a field reference, so skip field validation — the brace-push path
+        // resolves it via `lastIdentifier` (already dot-stripped above).
+        if (tok.value.endsWith('.') && next && next.kind === 'punctuation' && next.value === '{') {
             continue;
         }
 
