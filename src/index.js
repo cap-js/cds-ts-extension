@@ -159,7 +159,7 @@ class PersistentWorkerPool {
             if (msg.type === 'stderr') logger.info(`[cds-plugin] worker stderr: ${msg.text}`);
         });
         thread.on('error', (err) => {
-            logger.info(`[cds-plugin] bridge error: ${err.message}`);
+            logger.info(`[cds-plugin] bridge error: ${err instanceof Error ? err.message : String(err)}`);
             this.bridges.delete(projectRoot);
         });
         const ctrlArr = new Int32Array(ctrl);
