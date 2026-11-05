@@ -501,6 +501,36 @@ describe('getSuggestions — keywords', () => {
         assert.equal(kw.kind, 'keyword');
         assert.equal(kw.entity, undefined);
     });
+
+    it('offers statement keywords at the start of an empty query', () => {
+        const labels = getSuggestions('', 0, model, 'Svc').map((i) => i.label);
+        includesAll(labels, ['SELECT', 'INSERT', 'UPDATE', 'UPSERT', 'DELETE']);
+        assert.ok(
+            getSuggestions('', 0, model, 'Svc').every((i) => i.kind === 'keyword'),
+            'only keyword suggestions at empty-query start',
+        );
+    });
+
+    it('offers statement keywords after leading whitespace', () => {
+        includesAll(
+            getSuggestions('   ', 3, model, 'Svc').map((i) => i.label),
+            ['SELECT', 'UPDATE', 'DELETE'],
+        );
+    });
+
+    it('offers statement keywords while typing the first word', () => {
+        // Host (tsserver) filters by prefix; the plugin offers the full set.
+        includesAll(
+            getSuggestions('SE', 2, model, 'Svc').map((i) => i.label),
+            ['SELECT', 'INSERT', 'UPDATE', 'UPSERT', 'DELETE'],
+        );
+    });
+
+    it('does not offer statement keywords once a clause context exists', () => {
+        const labels = kws('SELECT ID FROM Books |');
+        excludes(labels, 'SELECT');
+        excludes(labels, 'DELETE');
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -3726,15 +3756,23 @@ describe('extractSourceRelations — implicit alias', () => {
 // getSuggestions — unknown clause
 // ---------------------------------------------------------------------------
 
-describe('getSuggestions — unknown clause returns empty', () => {
-    it('returns empty array when clause context is unknown (cursor before any keyword)', () => {
+describe('getSuggestions — statement start', () => {
+    it('offers statement keywords when the cursor is before any keyword', () => {
         // Cursor at position 0 of a query that starts with whitespace — before SELECT,
-        // so getCursorClause returns { kind: 'unknown' } and getSuggestions returns [].
+        // so getCursorClause returns { kind: 'unknown' }. This is the start of the
+        // statement, so getSuggestions offers the statement-opening keywords.
         const query = ' SELECT id FROM Books';
-        const cursor = 0; // before SELECT — unknown clause
+        const cursor = 0; // before SELECT — statement start
         const defs_ = defs({ Books: { id: 'cds.UUID' } });
         const suggestions = getSuggestions(query, cursor, defs_, undefined);
-        assert.deepEqual(suggestions, [], 'before-SELECT position must return no suggestions');
+        includesAll(
+            suggestions.map((i) => i.label),
+            ['SELECT', 'INSERT', 'UPDATE', 'UPSERT', 'DELETE'],
+        );
+        assert.ok(
+            suggestions.every((i) => i.kind === 'keyword'),
+            'only keyword suggestions at statement start',
+        );
     });
 });
 

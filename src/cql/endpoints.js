@@ -63,6 +63,13 @@ const CLAUSE_KEYWORDS = {
 };
 
 /**
+ * Statement-opening keywords offered at the very start of a query (empty template
+ * or a partial first word), before any clause context exists. These are the CQL
+ * statement heads the plugin validates.
+ */
+const STATEMENT_KEYWORDS = ['SELECT', 'INSERT', 'UPDATE', 'UPSERT', 'DELETE'];
+
+/**
  * Build keyword completion entries for a clause. Returns [] for clauses with no
  * keyword suggestions.
  * @param {keyof typeof CLAUSE_KEYWORDS | 'unknown'} clauseKind
@@ -189,8 +196,19 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
             return items;
         }
 
-        case 'unknown':
+        case 'unknown': {
+            // At the very start of a query — nothing meaningful typed before the
+            // cursor except possibly a partial first word being typed (`SE|`) —
+            // offer the statement-opening keywords. `significant` excludes
+            // whitespace/unknown; a lone identifier straddling the cursor is the
+            // in-progress first word and does not count as prior context.
+            const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
+            const priorTokens = significant.filter((t) => t.end <= cursorOffset && !(t.kind === 'identifier' && t.start < cursorOffset && t.end >= cursorOffset));
+            if (priorTokens.length === 0) {
+                return STATEMENT_KEYWORDS.map((label) => ({ label, kind: /** @type {const} */ ('keyword'), detail: 'keyword' }));
+            }
             return [];
+        }
     }
     return [];
 }
