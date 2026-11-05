@@ -15,6 +15,38 @@ const { resolveSource, resolveBaseType, followAssocPath, isToMany, elementNamesW
 /** @typedef {import('./types').CompletionEntry} CompletionEntry */
 /** @typedef {import('./types').CqlDiagnostic} CqlDiagnostic */
 /** @typedef {import('../csn').CsnDefs} CsnDefs */
+/** @typedef {import('../csn').CsnArtifact} CsnArtifact */
+
+/**
+ * Resolve a dotted reference `a.b.…z` as an association-path navigation starting
+ * from `artifact`: every segment except the last must be an association (followed
+ * to its target entity); the last segment must be a plain element (or synthesized
+ * foreign-key column) of the terminal entity.
+ *
+ * Returns `null` on success, or `{ seg, kind }` describing the first failing
+ * segment: `kind: 'source'` for an unnavigable (non-association) hop, `'field'`
+ * for an unknown terminal field — so the caller can craft the right diagnostic.
+ *
+ * @param {CsnDefs} defs
+ * @param {CsnArtifact} artifact starting entity
+ * @param {string[]} segments dotted-reference segments (length >= 2)
+ * @returns {{ seg: number, kind: 'source' | 'field' } | null} failure descriptor, or null if valid
+ */
+function resolveAssocPath(defs, artifact, segments) {
+    let current = artifact;
+    for (let s = 0; s < segments.length - 1; s++) {
+        const name = /** @type {string} */ (segments[s]);
+        const el = /** @type {import('../csn').CsnElement | undefined} */ (current.elements?.[name]);
+        const targetName = el ? /** @type {string | undefined} */ (el.target) : undefined;
+        if (!(el && targetName)) return { seg: s, kind: 'source' };
+        const target = defs[targetName];
+        if (!target) return { seg: s, kind: 'source' };
+        current = target;
+    }
+    const last = /** @type {string} */ (segments[segments.length - 1]);
+    const names = elementNamesWithForeignKeys(current);
+    return names.has(last) ? null : { seg: segments.length - 1, kind: 'field' };
+}
 
 /**
  * @param {string} query
@@ -345,25 +377,61 @@ function validateCqlQuery(query, defs, prefix) {
             }
 
             if (tok.value.includes('.')) {
-                // Qualified reference: tableRef.fieldName
-                const dotIdx = tok.value.indexOf('.');
-                const tableRef = tok.value.slice(0, dotIdx);
-                const field = tok.value.slice(dotIdx + 1);
-                const src = resolvedSources.find((s) => s.ref === tableRef);
-                if (!src) {
-                    errors.push({
-                        message: `Unknown source '${tableRef}'`,
-                        start: tok.start,
-                        end: tok.start + dotIdx,
-                        code: CqlDiagnosticCode.UnknownSource,
-                    });
-                } else if (!sourceElements.get(tableRef)?.has(field)) {
-                    errors.push({
-                        message: `Unknown field '${field}' on '${src.fqn}'`,
-                        start: tok.start + dotIdx + 1,
-                        end: tok.end,
-                        code: CqlDiagnosticCode.UnknownField,
-                    });
+                // Dotted reference. Two valid interpretations:
+                //   (A) source-qualified:   <sourceRef>.<field…>   (e.g. `b.title`, `b.author.name`)
+                //   (B) association path:    <assoc>.<…>.<field>    (e.g. `Status.code`, `up_.Travel.ID`)
+                // Try (A) first (the first segment names a FROM/JOIN source), then
+                // (B) against each resolved source. Only error if neither resolves.
+                const segments = tok.value.split('.');
+                const first = /** @type {string} */ (segments[0]);
+                // byte offset of each segment start within the token
+                const segOffset = (/** @type {number} */ idxSeg) => tok.start + segments.slice(0, idxSeg).reduce((/** @type {number} */ n, /** @type {string} */ s) => n + s.length + 1, 0);
+
+                const src = resolvedSources.find((s) => s.ref === first);
+                if (src) {
+                    // (A) source-qualified: validate the remaining segments as an
+                    // assoc-path from that source's entity. A lone field is the
+                    // 1-hop case. `followAssocPath`-style resolution handles deeper
+                    // paths like `b.author.name`.
+                    const rest = segments.slice(1);
+                    const names = sourceElements.get(first);
+                    const simpleHit = rest.length === 1 && (names?.has(/** @type {string} */ (rest[0])) || elementNamesWithForeignKeys(src.artifact).has(/** @type {string} */ (rest[0])));
+                    const fail = simpleHit ? null : resolveAssocPath(defs, src.artifact, rest);
+                    if (fail) {
+                        errors.push({
+                            message: `Unknown field '${rest[fail.seg]}' on '${src.fqn}'`,
+                            start: segOffset(fail.seg + 1),
+                            end: tok.end,
+                            code: CqlDiagnosticCode.UnknownField,
+                        });
+                    }
+                } else {
+                    // (B) association path from a source entity (no source alias
+                    // matched the first segment). Valid if ANY resolved source can
+                    // navigate the full path.
+                    const resolvedAny = resolvedSources.some((s) => resolveAssocPath(defs, s.artifact, segments) === null);
+                    if (!resolvedAny) {
+                        // Report against the first source for a concrete message.
+                        // If the first segment isn't even an association/element of
+                        // any source, it reads as an unknown source; otherwise a
+                        // later segment is the unknown field.
+                        const firstIsKnown = resolvedSources.some((s) => elementNamesWithForeignKeys(s.artifact).has(first) || Boolean(/** @type {any} */ (s.artifact.elements?.[first])?.target));
+                        if (firstIsKnown) {
+                            errors.push({
+                                message: `Unknown field '${tok.value}'`,
+                                start: tok.start,
+                                end: tok.end,
+                                code: CqlDiagnosticCode.UnknownField,
+                            });
+                        } else {
+                            errors.push({
+                                message: `Unknown source '${first}'`,
+                                start: tok.start,
+                                end: segOffset(1) - 1,
+                                code: CqlDiagnosticCode.UnknownSource,
+                            });
+                        }
+                    }
                 }
             } else {
                 // Unqualified reference
