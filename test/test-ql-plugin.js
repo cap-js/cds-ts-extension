@@ -236,6 +236,15 @@ const BOOKS_WORKER = (_args) => ({
     ],
 });
 
+// Returns a field plus a keyword completion, to exercise the keyword-kind host
+// mapping (ScriptElementKind.keyword + the later sortText bucket).
+const KEYWORD_WORKER = (_args) => ({
+    completions: [
+        { label: 'id', detail: 'cds.UUID', kind: 'field' },
+        { label: 'FROM', detail: 'keyword', kind: 'keyword' },
+    ],
+});
+
 const BOOKS_BATCH_WORKER = (_root, probes, _logger) => ({
     fields: Object.fromEntries(
         probes.map((p) => [
@@ -303,6 +312,20 @@ describe('Plugin proxy — completions', () => {
         const proxyLabels = result?.entries.map((e) => e.name) ?? [];
         assert.ok(!proxyLabels.includes('id'), 'CDS field must NOT appear outside template');
         assert.ok(!proxyLabels.includes('title'), 'CDS field must NOT appear outside template');
+    });
+
+    it('maps keyword completions to the keyword kind and sorts them below fields', () => {
+        const src = 'const r = await cds.ql`SELECT id FROM Books                      `;\nexport {};';
+        const pos = posOf(src, 'id');
+        const { proxy } = createProxy('test.ts', src, KEYWORD_WORKER);
+        const info = proxy.getCompletionsAtPosition('test.ts', pos, undefined, undefined);
+        assert.ok(info, 'expected completion info');
+        const field = info.entries.find((e) => e.name === 'id');
+        const keyword = info.entries.find((e) => e.name === 'FROM');
+        assert.ok(field && keyword, 'both field and keyword entries expected');
+        assert.equal(keyword.kind, TS.ScriptElementKind.keyword, 'keyword entry maps to keyword ScriptElementKind');
+        // Field sorts into the 0_ bucket, keyword into 1_ → fields rank above keywords.
+        assert.ok(field.sortText < keyword.sortText, 'keyword must sort below field');
     });
 
     it('feature flag cds.ql.completion=false suppresses CDS completions', () => {

@@ -353,7 +353,9 @@ describe('getSuggestions — fields', () => {
             items.map((i) => i.label),
             ['ID', 'title'],
         );
-        assert.ok(items.every((i) => i.kind === 'field'));
+        // Field entries carry kind 'field'; keyword suggestions (DISTINCT/FROM) also
+        // appear here and are asserted separately in the keywords block.
+        assert.ok(items.filter((i) => i.kind !== 'keyword').every((i) => i.kind === 'field'));
     });
 
     it('suggests fields when cursor is before FROM', () => {
@@ -385,7 +387,7 @@ describe('getSuggestions — fields', () => {
         const { query, cursor } = withCursor('SELECT | FROM Books');
         const items = getSuggestions(query, cursor, model, 'Svc');
         assert.ok(
-            items.every((i) => i.entity === 'Svc.Books'),
+            items.filter((i) => i.kind === 'field').every((i) => i.entity === 'Svc.Books'),
             'all fields should be tagged with Svc.Books',
         );
     });
@@ -416,13 +418,18 @@ describe('getSuggestions — fields', () => {
     });
 
     it('returns empty suggestions when entity has no elements', () => {
-        // Entity exists but has no elements — getSuggestions must return [] gracefully
+        // Entity exists but has no elements — getSuggestions must produce no field
+        // suggestions (clause keywords like FROM/DISTINCT may still appear).
         const noElemModel = {
             'Svc.Books': { kind: 'entity' },
         };
         const { query, cursor } = withCursor('SELECT | FROM Books');
         const items = getSuggestions(query, cursor, noElemModel, 'Svc');
-        assert.deepEqual(items, [], 'entity with no elements must produce empty suggestions');
+        assert.deepEqual(
+            items.filter((i) => i.kind !== 'keyword'),
+            [],
+            'entity with no elements must produce no field suggestions',
+        );
     });
 
     it('uses @description as doc when doc.val is absent', () => {
@@ -443,6 +450,56 @@ describe('getSuggestions — fields', () => {
         const titleEntry = items.find((i) => i.label === 'title');
         assert.ok(titleEntry, 'title must be in suggestions');
         assert.equal(titleEntry.doc, 'Book title', '@description val must be used as doc');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// getSuggestions — keyword completions
+// ---------------------------------------------------------------------------
+
+describe('getSuggestions — keywords', () => {
+    const model = defs({
+        'Svc.Books': { ID: 'cds.UUID', title: 'cds.String' },
+        'Svc.Authors': { ID: 'cds.UUID', name: 'cds.String' },
+    });
+    const kws = (template) => {
+        const { query, cursor } = withCursor(template);
+        return getSuggestions(query, cursor, model, 'Svc')
+            .filter((i) => i.kind === 'keyword')
+            .map((i) => i.label);
+    };
+
+    it('offers DISTINCT and FROM in the SELECT clause', () => {
+        includesAll(kws('SELECT | FROM Books'), ['DISTINCT', 'FROM']);
+        includesAll(kws('SELECT ID |'), ['DISTINCT', 'FROM']);
+    });
+
+    it('offers transition keywords after a named FROM source', () => {
+        includesAll(kws('SELECT ID FROM Books |'), ['WHERE', 'ORDER BY', 'GROUP BY', 'HAVING', 'LIMIT', 'JOIN', 'LEFT JOIN', 'ON']);
+    });
+
+    it('offers no transition keywords right after a bare FROM (entities only)', () => {
+        assert.deepEqual(kws('SELECT ID FROM |'), []);
+    });
+
+    it('offers boolean/predicate keywords in the WHERE clause', () => {
+        includesAll(kws('SELECT ID FROM Books WHERE title = 1 |'), ['AND', 'OR', 'NOT', 'LIKE', 'IS']);
+    });
+
+    it('offers ASC/DESC in the ORDER BY clause', () => {
+        includesAll(kws('SELECT ID FROM Books ORDER BY ID |'), ['ASC', 'DESC']);
+    });
+
+    it('offers no keywords inside a projection/expand block', () => {
+        assert.deepEqual(kws('SELECT ID FROM Books { | }'), []);
+        assert.deepEqual(kws('SELECT ID FROM Books { ID, | }'), []);
+    });
+
+    it('tags keyword entries with kind "keyword" and no entity', () => {
+        const { query, cursor } = withCursor('SELECT ID |');
+        const kw = getSuggestions(query, cursor, model, 'Svc').find((i) => i.label === 'FROM');
+        assert.equal(kw.kind, 'keyword');
+        assert.equal(kw.entity, undefined);
     });
 });
 
@@ -4209,7 +4266,7 @@ describe('getSuggestions — doc annotation fallbacks', () => {
         const q = 'SELECT  FROM NoSuchEntity';
         const cursor = 'SELECT '.length;
         const items = getSuggestions(q, cursor, d);
-        assert.equal(items.length, 0, 'no items when source cannot be resolved');
+        assert.equal(items.filter((i) => i.kind !== 'keyword').length, 0, 'no field items when source cannot be resolved');
     });
 });
 

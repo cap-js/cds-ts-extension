@@ -49,6 +49,31 @@ function resolveAssocPath(defs, artifact, segments) {
 }
 
 /**
+ * CQL keywords offered as completions per clause context. Transition keywords
+ * (that move the query into the next clause) and the named keywords valid within
+ * a clause. Deliberately excludes deep operator-vs-value expression tracking.
+ * Multi-word keywords (`ORDER BY`, `LEFT JOIN`) are single entries.
+ */
+const CLAUSE_KEYWORDS = {
+    'select-item': ['DISTINCT', 'FROM'],
+    // Offered only once an entity has been named (see getSuggestions).
+    'from-source': ['WHERE', 'ORDER BY', 'GROUP BY', 'HAVING', 'LIMIT', 'OFFSET', 'JOIN', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'ON', 'AS'],
+    'where-expr': ['AND', 'OR', 'NOT', 'LIKE', 'BETWEEN', 'IN', 'IS', 'NULL', 'EXISTS'],
+    'order-by': ['ASC', 'DESC'],
+};
+
+/**
+ * Build keyword completion entries for a clause. Returns [] for clauses with no
+ * keyword suggestions.
+ * @param {keyof typeof CLAUSE_KEYWORDS | 'unknown'} clauseKind
+ * @returns {CompletionEntry[]}
+ */
+function keywordSuggestions(clauseKind) {
+    const words = clauseKind in CLAUSE_KEYWORDS ? CLAUSE_KEYWORDS[/** @type {keyof typeof CLAUSE_KEYWORDS} */ (clauseKind)] : [];
+    return words.map((label) => ({ label, kind: /** @type {const} */ ('keyword'), detail: 'keyword' }));
+}
+
+/**
  * @param {string} query
  * @param {number} cursorOffset
  * @param {CsnDefs} defs
@@ -116,6 +141,17 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
                     });
                 }
             }
+            // Clause keywords (DISTINCT/FROM in SELECT; AND/OR/… in WHERE; ASC/DESC
+            // in ORDER BY) appended after fields; the host sorts them below fields.
+            // Suppressed inside a projection/expand block (`Entity { … }`), where the
+            // cursor selects columns and clause keywords do not apply.
+            let braceBalance = 0;
+            for (const t of significant) {
+                if (t.start >= cursorOffset) break;
+                if (t.kind === 'punctuation' && t.value === '{') braceBalance++;
+                else if (t.kind === 'punctuation' && t.value === '}') braceBalance--;
+            }
+            if (braceBalance <= 0) items.push(...keywordSuggestions(clause.kind));
             return items;
         }
 
@@ -142,6 +178,13 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
                         detail: fqn,
                     });
                 }
+            }
+            // Transition keywords (WHERE/ORDER BY/JOIN/…) only once an entity has
+            // been named before the cursor — right after a bare `FROM`/`JOIN` the
+            // user is still picking an entity, so offer entities only.
+            const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
+            if (extractSourceRelations(significant).length > 0) {
+                items.push(...keywordSuggestions('from-source'));
             }
             return items;
         }
