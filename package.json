@@ -37,7 +37,7 @@
         "@cap-js/sqlite": "^3.1.2",
         "@sap/cds": "10.x",
         "@sap/cds-compiler": "7.1.1",
-        "@types/node": "^24.19.2",
+        "@types/node": "^26.6.6",
         "typescript": "6.x",
         "zod": "^3.25.76"
     }
