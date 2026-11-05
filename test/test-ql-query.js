@@ -95,6 +95,12 @@ describe('tokenizeCql', () => {
         assert.deepEqual(kws, ['select', 'from']);
     });
 
+    it('recognizes the `one` singularizer as a keyword', () => {
+        const tokens = tokenizeCql('SELECT one ID FROM Books');
+        const sig = tokens.filter((t) => t.kind !== 'whitespace').map((t) => `${t.kind}:${t.value}`);
+        assert.deepEqual(sig, ['keyword:SELECT', 'keyword:one', 'identifier:ID', 'keyword:FROM', 'identifier:Books']);
+    });
+
     it('handles SELECT *', () => {
         const tokens = tokenizeCql('SELECT * FROM Books');
         assert.ok(
@@ -574,6 +580,18 @@ describe('validateCqlQuery', () => {
 
     it('returns no errors for SELECT *', () => {
         assert.deepEqual(validateCqlQuery('SELECT * FROM Books', model, 'Svc'), []);
+    });
+
+    it('accepts the `one` singularizer keyword before the column list', () => {
+        assert.deepEqual(validateCqlQuery('SELECT one ID, title FROM Books', model, 'Svc'), []);
+        assert.deepEqual(validateCqlQuery('SELECT ONE ID FROM Books', model, 'Svc'), []);
+        assert.deepEqual(validateCqlQuery('SELECT one * FROM Books', model, 'Svc'), []);
+    });
+
+    it('still validates columns that follow the `one` keyword', () => {
+        const errs = validateCqlQuery('SELECT one ghost FROM Books', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.ok(errs[0].message.includes('ghost'));
     });
 
     it('reports unknown entity', () => {
@@ -4277,6 +4295,14 @@ describe('parseCqlColumns', () => {
 
     it('parses flat classic columns', () => {
         const result = parseCqlColumns('SELECT ID, title FROM Books');
+        assert.deepEqual(result, [
+            { field: 'ID', alias: 'ID' },
+            { field: 'title', alias: 'title' },
+        ]);
+    });
+
+    it('excludes the `one` singularizer keyword from the column list', () => {
+        const result = parseCqlColumns('SELECT one ID, title FROM Books');
         assert.deepEqual(result, [
             { field: 'ID', alias: 'ID' },
             { field: 'title', alias: 'title' },
