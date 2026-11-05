@@ -165,11 +165,14 @@ function validateCqlQuery(query, defs, prefix) {
 
     if (resolvedSources.length === 0) return errors;
 
-    // Per-source element sets (for ambiguity detection) and combined set
-    const sourceElements = new Map(); // ref → element names
+    // Per-source element sets (for ambiguity detection) and combined set.
+    // Include synthesized managed-association foreign-key columns (e.g. `author_ID`
+    // for association `author`) — these are valid field references even though they
+    // are not top-level elements in the unresolved CSN.
+    const sourceElements = new Map(); // ref → element names (incl. FK columns)
     const elementCount = new Map(); // name → how many sources have it
     for (const { ref, artifact } of resolvedSources) {
-        const names = new Set(Object.keys(artifact.elements ?? {}));
+        const names = elementNamesWithForeignKeys(artifact);
         sourceElements.set(ref, names);
         for (const name of names) elementCount.set(name, (elementCount.get(name) ?? 0) + 1);
     }
