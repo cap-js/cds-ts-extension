@@ -60,6 +60,11 @@ const CLAUSE_KEYWORDS = {
     'from-source': ['WHERE', 'ORDER BY', 'GROUP BY', 'HAVING', 'LIMIT', 'OFFSET', 'JOIN', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'ON', 'AS'],
     'where-expr': ['AND', 'OR', 'NOT', 'LIKE', 'BETWEEN', 'IN', 'IS', 'NULL', 'EXISTS'],
     'order-by': ['ASC', 'DESC'],
+    // Write-statement positions.
+    'delete-target': ['FROM'],
+    'delete-body': ['WHERE'],
+    'insert-target': ['INTO'],
+    'insert-body': ['VALUES', 'ENTRIES', 'SET', 'COLUMNS'],
 };
 
 /**
@@ -78,6 +83,32 @@ const STATEMENT_KEYWORDS = ['SELECT', 'INSERT', 'UPDATE', 'UPSERT', 'DELETE'];
 function keywordSuggestions(clauseKind) {
     const words = clauseKind in CLAUSE_KEYWORDS ? CLAUSE_KEYWORDS[/** @type {keyof typeof CLAUSE_KEYWORDS} */ (clauseKind)] : [];
     return words.map((label) => ({ label, kind: /** @type {const} */ ('keyword'), detail: 'keyword' }));
+}
+
+/**
+ * Enumerate entity/view completions from the model — the local names under the
+ * service `prefix`, or the full FQNs when no prefix is set. Shared by the
+ * `from-source` clause and the write-statement target positions.
+ * @param {CsnDefs} defs
+ * @param {string} [prefix]
+ * @returns {CompletionEntry[]}
+ */
+function entitySuggestions(defs, prefix) {
+    /** @type {CompletionEntry[]} */
+    const items = [];
+    const qualifier = prefix ? prefix + '.' : null;
+    for (const [fqn, artifact] of Object.entries(defs)) {
+        if (!(artifact.kind && SOURCE_KINDS.has(artifact.kind))) continue;
+        if (qualifier) {
+            if (fqn.startsWith(qualifier)) {
+                const localName = fqn.slice(qualifier.length);
+                if (!localName.includes('.')) items.push({ label: localName, kind: csnEntryKind(artifact.kind), detail: fqn });
+            }
+        } else {
+            items.push({ label: fqn, kind: csnEntryKind(artifact.kind), detail: fqn });
+        }
+    }
+    return items;
 }
 
 /**
@@ -163,29 +194,7 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
         }
 
         case 'from-source': {
-            /** @type {CompletionEntry[]} */
-            const items = [];
-            const qualifier = prefix ? prefix + '.' : null;
-            for (const [fqn, artifact] of Object.entries(defs)) {
-                if (!(artifact.kind && SOURCE_KINDS.has(artifact.kind))) continue;
-                if (qualifier) {
-                    if (fqn.startsWith(qualifier)) {
-                        const localName = fqn.slice(qualifier.length);
-                        if (!localName.includes('.'))
-                            items.push({
-                                label: localName,
-                                kind: csnEntryKind(artifact.kind),
-                                detail: fqn,
-                            });
-                    }
-                } else {
-                    items.push({
-                        label: fqn,
-                        kind: csnEntryKind(artifact.kind),
-                        detail: fqn,
-                    });
-                }
-            }
+            const items = entitySuggestions(defs, prefix);
             // Transition keywords (WHERE/ORDER BY/JOIN/…) only once an entity has
             // been named before the cursor — right after a bare `FROM`/`JOIN` the
             // user is still picking an entity, so offer entities only.
@@ -195,6 +204,26 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
             }
             return items;
         }
+
+        case 'delete-target':
+        case 'insert-target':
+            // After DELETE / INSERT|UPSERT head: offer the connective keyword
+            // (FROM / INTO). No entities yet — they come after FROM/INTO.
+            return keywordSuggestions(clause.kind);
+
+        case 'delete-body':
+        case 'insert-body':
+            // After the write target entity: the body keywords (WHERE for DELETE;
+            // VALUES/ENTRIES/SET/COLUMNS for INSERT/UPSERT).
+            return keywordSuggestions(clause.kind);
+
+        case 'update-target':
+            // UPDATE <entity>: the target is an entity (no INTO/FROM in UPDATE).
+            return entitySuggestions(defs, prefix);
+
+        case 'update-body':
+            // UPDATE <entity> …: SET (unless already present) and WHERE.
+            return (clause.hasSet ? ['WHERE'] : ['SET', 'WHERE']).map((label) => ({ label, kind: /** @type {const} */ ('keyword'), detail: 'keyword' }));
 
         case 'unknown': {
             // At the very start of a query — nothing meaningful typed before the
@@ -226,9 +255,10 @@ function validateCqlQuery(query, defs, prefix) {
 
     // Write statements (UPDATE / INSERT / UPSERT) have no FROM clause, so they
     // are validated by a dedicated path. DELETE has a FROM and flows through the
-    // SELECT-oriented logic below.
+    // SELECT-oriented logic below. The heads tokenize as keywords, but tolerate an
+    // identifier too (defensive — e.g. if the keyword set ever changes).
     const head = significant[0];
-    if (head && head.kind === 'identifier') {
+    if (head && (head.kind === 'keyword' || head.kind === 'identifier')) {
         const kw = head.value.toUpperCase();
         if (kw === 'UPDATE' || kw === 'INSERT' || kw === 'UPSERT') {
             return validateWriteStatement(significant, defs, prefix);
@@ -580,8 +610,9 @@ function validateWriteStatement(significant, defs, prefix) {
     };
 
     if (isUpdate) {
-        // Find SET … and WHERE … regions.
-        const setIdx = significant.findIndex((t) => t.kind === 'identifier' && t.value.toUpperCase() === 'SET');
+        // Find SET … and WHERE … regions. SET is a keyword token (tolerate an
+        // identifier too, defensively).
+        const setIdx = significant.findIndex((t) => (t.kind === 'keyword' || t.kind === 'identifier') && t.value.toUpperCase() === 'SET');
         const whereIdx = significant.findIndex((t) => t.kind === 'keyword' && t.value.toUpperCase() === 'WHERE');
         const setEnd = whereIdx === -1 ? significant.length : whereIdx;
 
@@ -633,8 +664,9 @@ function validateWriteStatement(significant, defs, prefix) {
     // INSERT / UPSERT — validate column names only.
     // Column list: `( c , c )` directly after the entity, or after a COLUMNS id.
     // ENTRIES object: `{ c : v , c : v }` — keys are identifiers before ':'.
-    const entriesIdx = significant.findIndex((t) => t.kind === 'identifier' && t.value.toUpperCase() === 'ENTRIES');
-    const valuesIdx = significant.findIndex((t) => t.kind === 'identifier' && t.value.toUpperCase() === 'VALUES');
+    // ENTRIES/VALUES are keyword tokens (tolerate identifiers defensively).
+    const entriesIdx = significant.findIndex((t) => (t.kind === 'keyword' || t.kind === 'identifier') && t.value.toUpperCase() === 'ENTRIES');
+    const valuesIdx = significant.findIndex((t) => (t.kind === 'keyword' || t.kind === 'identifier') && t.value.toUpperCase() === 'VALUES');
 
     if (entriesIdx !== -1) {
         const braceStart = entriesIdx + 1;

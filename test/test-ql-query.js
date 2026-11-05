@@ -534,6 +534,60 @@ describe('getSuggestions — keywords', () => {
 });
 
 // ---------------------------------------------------------------------------
+// getSuggestions — write-statement keyword/entity completions
+// ---------------------------------------------------------------------------
+
+describe('getSuggestions — write statements', () => {
+    const model = defs({
+        'Svc.Books': { ID: 'cds.UUID', title: 'cds.String' },
+        'Svc.Authors': { ID: 'cds.UUID', name: 'cds.String' },
+    });
+    const at = (query) => getSuggestions(query, query.length, model, 'Svc');
+    const labels = (query) => at(query).map((i) => i.label);
+    const kinds = (query) => new Set(at(query).map((i) => i.kind));
+
+    it('DELETE → FROM', () => {
+        assert.deepEqual(labels('DELETE '), ['FROM']);
+    });
+    it('DELETE FROM → entities', () => {
+        includesAll(labels('DELETE FROM '), ['Books', 'Authors']);
+        assert.deepEqual([...kinds('DELETE FROM ')], ['entity']);
+    });
+    it('DELETE FROM <entity> → WHERE', () => {
+        assert.deepEqual(labels('DELETE FROM Books '), ['WHERE']);
+    });
+
+    it('UPDATE → entities', () => {
+        includesAll(labels('UPDATE '), ['Books', 'Authors']);
+        assert.deepEqual([...kinds('UPDATE ')], ['entity']);
+    });
+    it('UPDATE <entity> → SET and WHERE', () => {
+        includesAll(labels('UPDATE Books '), ['SET', 'WHERE']);
+    });
+    it('UPDATE <entity> SET … → WHERE only (SET already present)', () => {
+        assert.deepEqual(labels('UPDATE Books SET title = 1 '), ['WHERE']);
+    });
+
+    it('INSERT → INTO', () => {
+        assert.deepEqual(labels('INSERT '), ['INTO']);
+    });
+    it('UPSERT → INTO', () => {
+        assert.deepEqual(labels('UPSERT '), ['INTO']);
+    });
+    it('INSERT INTO → entities', () => {
+        includesAll(labels('INSERT INTO '), ['Books', 'Authors']);
+    });
+    it('INSERT INTO <entity> → VALUES/ENTRIES/SET/COLUMNS', () => {
+        includesAll(labels('INSERT INTO Books '), ['VALUES', 'ENTRIES', 'SET', 'COLUMNS']);
+    });
+
+    it('write keywords carry kind "keyword"', () => {
+        assert.ok(at('DELETE ').every((i) => i.kind === 'keyword'));
+        assert.ok(at('INSERT INTO Books ').every((i) => i.kind === 'keyword'));
+    });
+});
+
+// ---------------------------------------------------------------------------
 // getSuggestions — entity completions
 // ---------------------------------------------------------------------------
 
