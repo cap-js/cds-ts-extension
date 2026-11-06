@@ -65,6 +65,8 @@ Two CQL column orderings are fully supported (per [CQL docs](https://cap.cloud.s
 - **Postfix-projection**: `SELECT FROM Books { ID, title }` — `SELECT` still comes first; the column list follows the entity name in `{...}`.
 - **Expand blocks**: `SELECT FROM Books { ID, author { name } }` — association fields produce nested object types (`author: { name: string }[]`). Nesting is recursive via BFS: each level of expand associations is resolved by probing target entity fields, so `author { address { street } }` correctly produces `author: { address: { street: string }[] }[]`. Inline dot-expand (`author.{ name }`) is equivalent, and aliased expands (`author as writer { name }`) nest under the alias.
 
+The `one` singularizer keyword is recognized in classic projections: `SELECT one ID, title FROM Books` (case-insensitive, immediately after `SELECT`, before the column list). It is CAP's in-template equivalent of the fluent `SELECT.one` and is excluded from column resolution — the columns that follow it are validated and typed as usual.
+
 > Note: `FROM Entity SELECT …` (the `FROM` keyword before `SELECT`) is **not** valid CQL and is intentionally not parsed — such a query yields no columns and the variable type degrades to `unknown`.
 
 The rewrite differs by file type:

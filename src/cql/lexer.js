@@ -9,6 +9,7 @@
 
 const CQL_KEYWORDS = new Set([
     'SELECT',
+    'ONE',
     'DISTINCT',
     'FROM',
     'WHERE',
