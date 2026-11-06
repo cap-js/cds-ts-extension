@@ -19,6 +19,8 @@ const { describe, it } = require('node:test');
 const { compileFlavors, withSqlite, sqlColumns, SqliteUnavailable } = require('./oracle');
 const schemas = require('./schemas');
 const { cdsTypeToTs, resolveBaseType, isToMany, elementNamesWithForeignKeys, followAssocPath } = require('../../src/cql/csn-resolve');
+const { validateCqlQuery, getSuggestions } = require('../../src/cql/endpoints');
+const { deriveTruth, buildBattery } = require('./differential');
 
 const FIXTURE_ROOT = path.join(__dirname, '..', 'data', 'runtimeModel');
 
@@ -195,5 +197,70 @@ describe('runtime assumptions', () => {
                 liveTypeof: /** @type {any} */ (value === null ? 'object' : typeof value),
             });
         }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Differential oracle — diff the plugin's own outputs against CSN truth.
+// The battery is derived from the compiled model, so its scope scales with the
+// fixture and cannot be silently narrowed. A disagreement here is a real
+// plugin-vs-runtime defect (the kind unit tests, written against the same
+// assumption, cannot catch).
+// ---------------------------------------------------------------------------
+
+describe('differential oracle (plugin vs CSN truth)', () => {
+    /** @type {import('./oracle').CsnFlavors} */
+    let flavors;
+    /** @type {Map<string, import('./differential').TruthEntity>} */
+    let truth;
+    /** @type {import('./differential').BatteryCase[]} */
+    let battery;
+
+    it('derives a battery covering every case category (anti-rot)', async () => {
+        flavors = await compileFlavors(FIXTURE_ROOT);
+        truth = deriveTruth(flavors);
+        battery = buildBattery(truth);
+        assert.ok(truth.size >= 4, `expected >=4 entities in truth model, got ${truth.size}`);
+        // Per-category floor: an aggregate count can be satisfied by own+ghost cases
+        // alone, so deleting FK or association-path generation would stay green under
+        // a single total floor. Require each category to be non-empty so removing any
+        // generator fails loudly. Counts are derived from the fixture, which has
+        // managed associations (→ FKs + assoc-paths) and plain columns.
+        const byCat = (c) => battery.filter((x) => x.category === c).length;
+        for (const cat of ['own', 'fk', 'assoc-path', 'invalid']) {
+            assert.ok(byCat(cat) > 0, `differential battery has no '${cat}' cases — that generator may have been removed`);
+        }
+        assert.ok(battery.length >= 20, `differential battery too small (${battery.length}) — oracle may have been stubbed to a no-op`);
+    });
+
+    it('validateCqlQuery agrees with the model on every battery case', () => {
+        /** @type {string[]} */
+        const disagreements = [];
+        for (const { query, valid, why } of battery) {
+            const errs = validateCqlQuery(query, flavors.raw.definitions, undefined);
+            const pluginSaysValid = errs.length === 0;
+            if (pluginSaysValid !== valid) {
+                disagreements.push(`${why}: model=${valid ? 'valid' : 'invalid'} plugin=${pluginSaysValid ? 'valid' : 'invalid'} [${errs.map((e) => e.message).join('; ')}]`);
+            }
+        }
+        assert.deepEqual(disagreements, [], `plugin disagrees with CSN truth on ${disagreements.length} case(s):\n  ${disagreements.join('\n  ')}`);
+    });
+
+    it('getSuggestions offers only fields that exist in the model (no phantom completions)', () => {
+        /** @type {string[]} */
+        const phantoms = [];
+        let checked = 0;
+        for (const { fqn, own } of truth.values()) {
+            // Cursor right after `SELECT ` in a from-known query → field completions.
+            const query = `SELECT  FROM ${fqn}`;
+            const cursor = 'SELECT '.length;
+            const offered = getSuggestions(query, cursor, flavors.raw.definitions, undefined).filter((i) => i.kind === 'field');
+            for (const item of offered) {
+                checked++;
+                if (!own.has(item.label)) phantoms.push(`${fqn}: offered field '${item.label}' not in model`);
+            }
+        }
+        assert.ok(checked >= 20, `too few completion items checked (${checked}) — completion oracle may be a no-op`);
+        assert.deepEqual(phantoms, [], `phantom completions:\n  ${phantoms.join('\n  ')}`);
     });
 });

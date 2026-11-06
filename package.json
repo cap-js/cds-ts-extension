@@ -28,7 +28,7 @@
         "format": "biome format --write src test",
         "format:check": "biome format src test",
         "test": "node --test test/test-ql-query.js test/test-ql-ls.js test/test-ql-plugin.js",
-        "coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-exclude='test/**' --test-coverage-lines=98 --test-coverage-functions=96.7 --test-coverage-branches=92 test/test-ql-query.js test/test-ql-ls.js test/test-ql-plugin.js",
+        "coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-exclude='test/**' --test-coverage-lines=99 --test-coverage-functions=99 --test-coverage-branches=93 test/test-ql-query.js test/test-ql-ls.js test/test-ql-plugin.js",
         "test:runtime": "node --test test/runtime/test-runtime.js",
         "check": "npm run typecheck && npm run format:check && npm run lint && npm run coverage && npm run test:runtime"
     },
