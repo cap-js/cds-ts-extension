@@ -730,6 +730,7 @@ describe('validateCqlQuery', () => {
 });
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Synthesized managed-association foreign-key columns (`<assoc>_<key>`) are
 // valid field references in SELECT, even though they are not top-level elements
 // in the unresolved CSN.
@@ -767,6 +768,85 @@ describe('validateCqlQuery — synthesized FK columns', () => {
         const errs = validateCqlQuery('SELECT ghost_ID FROM Books', model, 'Svc');
         assert.equal(errs.length, 1);
         assert.equal(errs[0].code, CqlDiagnosticCode.UnknownField);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Association-path references in SELECT columns — `assoc.field` navigates the
+// association to its target entity (distinct from `alias.field` qualification).
+// ---------------------------------------------------------------------------
+
+describe('validateCqlQuery — association paths', () => {
+    // Hand-built model with managed associations (element carries `target` + `keys`).
+    const model = {
+        'Svc.Books': {
+            kind: 'entity',
+            elements: {
+                ID: { type: 'cds.UUID' },
+                title: { type: 'cds.String' },
+                author: { type: 'cds.Association', target: 'Svc.Authors', keys: [{ ref: ['ID'] }] },
+            },
+        },
+        'Svc.Authors': {
+            kind: 'entity',
+            elements: {
+                ID: { type: 'cds.UUID' },
+                name: { type: 'cds.String' },
+                address: { type: 'cds.Association', target: 'Svc.Addresses', keys: [{ ref: ['ID'] }] },
+            },
+        },
+        'Svc.Addresses': {
+            kind: 'entity',
+            elements: {
+                ID: { type: 'cds.UUID' },
+                city: { type: 'cds.String' },
+            },
+        },
+    };
+
+    it('accepts a single-hop association path (author.name)', () => {
+        assert.deepEqual(validateCqlQuery('SELECT author.name FROM Books', model, 'Svc'), []);
+    });
+
+    it('accepts a deep association path (author.address.city)', () => {
+        assert.deepEqual(validateCqlQuery('SELECT author.address.city FROM Books', model, 'Svc'), []);
+    });
+
+    it('accepts a synthesized FK column as the terminal segment (author.ID → author_ID exists)', () => {
+        // `author.ID` navigates the assoc to Authors and reads ID there.
+        assert.deepEqual(validateCqlQuery('SELECT author.ID FROM Books', model, 'Svc'), []);
+    });
+
+    it('accepts source-qualified + association path together (b.author.name)', () => {
+        assert.deepEqual(validateCqlQuery('SELECT b.author.name FROM Books as b', model, 'Svc'), []);
+    });
+
+    it('reports an unknown association as Unknown source', () => {
+        const errs = validateCqlQuery('SELECT ghost.name FROM Books', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.equal(errs[0].code, CqlDiagnosticCode.UnknownSource);
+        assert.ok(errs[0].message.includes('ghost'));
+    });
+
+    it('reports an unknown terminal field on a valid association path', () => {
+        const errs = validateCqlQuery('SELECT author.ghostField FROM Books', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.equal(errs[0].code, CqlDiagnosticCode.UnknownField);
+    });
+
+    it('reports a mid-path non-association segment', () => {
+        // `title` is a known scalar (not an association) so it cannot be navigated.
+        // It is reported as an unknown field (the whole path is invalid), not an
+        // unknown source — `title` itself exists on the entity.
+        const errs = validateCqlQuery('SELECT title.whatever FROM Books', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.equal(errs[0].code, CqlDiagnosticCode.UnknownField);
+    });
+
+    it('still reports an unknown alias-qualified source', () => {
+        const errs = validateCqlQuery('SELECT zz.ID FROM Books as b', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.equal(errs[0].code, CqlDiagnosticCode.UnknownSource);
     });
 });
 
