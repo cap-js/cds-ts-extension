@@ -23,7 +23,7 @@ export interface ResolvedColumn {
 
 export interface CompletionEntry {
     label: string;
-    kind: 'field' | 'entity' | 'view';
+    kind: 'field' | 'entity' | 'view' | 'keyword';
     detail: string;
     entity?: string;
     doc?: string;

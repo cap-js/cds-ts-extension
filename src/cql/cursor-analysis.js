@@ -73,6 +73,12 @@ function getTokenContext(query, cursorOffset, defs, prefix) {
  *   | { kind: 'from-source' }
  *   | { kind: 'where-expr', sources: CqlSource[] }
  *   | { kind: 'order-by', sources: CqlSource[] }
+ *   | { kind: 'delete-target' }
+ *   | { kind: 'delete-body' }
+ *   | { kind: 'update-target' }
+ *   | { kind: 'update-body', hasSet: boolean }
+ *   | { kind: 'insert-target' }
+ *   | { kind: 'insert-body' }
  *   | { kind: 'unknown' }
  * } CqlClause
  */
@@ -116,6 +122,11 @@ function getCursorClause(tokens, cursorOffset) {
     let postfixMode = false;
     // True once we've passed the entity name after FROM in postfix mode
     let postfixEntitySeen = false;
+    // Write-statement tracking: which write head opened the query, and whether its
+    // target entity has been named yet. null for SELECT (or no statement yet).
+    /** @type {'delete' | 'update' | 'insert' | null} */
+    let writeKind = null;
+    let writeEntitySeen = false;
 
     for (const tok of significant) {
         if (tok.start >= cursorOffset) break;
@@ -206,6 +217,29 @@ function getCursorClause(tokens, cursorOffset) {
                 postfixEntitySeen = false;
                 // We'll detect postfix when FROM comes next with nothing in between
                 // (tracked by checking whether any identifier was seen between SELECT and FROM)
+            } else if (kw === 'DELETE') {
+                writeKind = 'delete';
+                writeEntitySeen = false;
+                clause = { kind: 'delete-target' };
+                expectAlias = false;
+            } else if (kw === 'UPDATE') {
+                writeKind = 'update';
+                writeEntitySeen = false;
+                clause = { kind: 'update-target' };
+                expectAlias = false;
+            } else if (kw === 'INSERT' || kw === 'UPSERT') {
+                writeKind = 'insert';
+                writeEntitySeen = false;
+                clause = { kind: 'insert-target' };
+                expectAlias = false;
+            } else if (kw === 'INTO') {
+                // INSERT/UPSERT INTO <entity> — reuse from-source entity completion.
+                clause = { kind: 'from-source' };
+                expectAlias = false;
+            } else if (kw === 'SET') {
+                // UPDATE <entity> SET <assignments> — stays in update-body, hasSet true.
+                if (writeKind === 'update') clause = { kind: 'update-body', hasSet: true };
+                expectAlias = false;
             } else if (kw === 'FROM') {
                 if (clause.kind === 'select-item' && clause.expandPath !== undefined && clause.expandPath.length === 0 && fromSources.length === 0 && pendingEntity === null) {
                     // Nothing seen between SELECT and FROM → postfix mode
@@ -245,12 +279,26 @@ function getCursorClause(tokens, cursorOffset) {
                 fromSources.push({ entity: pendingEntity, ref: tok.value });
                 pendingEntity = null;
                 expectAlias = false;
+            } else if (clause.kind === 'update-target') {
+                // UPDATE <entity> — entity named; body expects SET/WHERE next.
+                writeEntitySeen = true;
+                clause = { kind: 'update-body', hasSet: false };
             } else if (clause.kind === 'from-source') {
                 if (pendingEntity === null) {
                     pendingEntity = tok.value;
                     if (postfixMode) postfixEntitySeen = true;
                 }
-                if (!postfixMode) clause = { kind: 'unknown' };
+                if (writeKind === 'delete') {
+                    // DELETE FROM <entity> — entity named; WHERE may follow.
+                    writeEntitySeen = true;
+                    clause = { kind: 'delete-body' };
+                } else if (writeKind === 'insert') {
+                    // INSERT/UPSERT INTO <entity> — entity named; column/VALUES/ENTRIES body.
+                    writeEntitySeen = true;
+                    clause = { kind: 'insert-body' };
+                } else if (!postfixMode) {
+                    clause = { kind: 'unknown' };
+                }
             }
         }
     }

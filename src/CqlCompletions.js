@@ -43,11 +43,14 @@ function getCqlCompletions(fileName, position, ctx, typescript) {
 
     const entries = result.completions.map((c) => {
         const isEntity = c.kind === 'entity' || c.kind === 'view';
+        const isKeyword = c.kind === 'keyword';
+        const scriptKind = c.kind === 'field' ? typescript.ScriptElementKind.memberVariableElement : isKeyword ? typescript.ScriptElementKind.keyword : typescript.ScriptElementKind.classElement;
         return {
             name: c.label,
-            kind: c.kind === 'field' ? typescript.ScriptElementKind.memberVariableElement : typescript.ScriptElementKind.classElement,
+            kind: scriptKind,
             kindModifiers: '',
-            sortText: '0_' + c.label,
+            // Keywords sort into a later bucket so fields/entities always rank above them.
+            sortText: (isKeyword ? '1_' : '0_') + c.label,
             labelDetails: c.detail ? { detail: `: ${c.detail}` } : undefined,
             ...(isEntity && !prefix
                 ? /** @type {{ hasAction: true; source: string }} */ ({
