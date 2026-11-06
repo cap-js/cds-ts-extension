@@ -216,15 +216,21 @@ describe('differential oracle (plugin vs CSN truth)', () => {
     /** @type {import('./differential').BatteryCase[]} */
     let battery;
 
-    it('derives a non-trivial battery from the fixture model', async () => {
+    it('derives a battery covering every case category (anti-rot)', async () => {
         flavors = await compileFlavors(FIXTURE_ROOT);
         truth = deriveTruth(flavors);
         battery = buildBattery(truth);
-        // Count floor (anti-rot): a refactor that silently empties the battery
-        // must fail loudly. The fixture has 5 entities with many columns; 20 is a
-        // conservative floor well below the real count. Raise if the fixture grows.
-        assert.ok(battery.length >= 20, `differential battery too small (${battery.length}) — oracle may have been stubbed to a no-op`);
         assert.ok(truth.size >= 4, `expected >=4 entities in truth model, got ${truth.size}`);
+        // Per-category floor: an aggregate count can be satisfied by own+ghost cases
+        // alone, so deleting FK or association-path generation would stay green under
+        // a single total floor. Require each category to be non-empty so removing any
+        // generator fails loudly. Counts are derived from the fixture, which has
+        // managed associations (→ FKs + assoc-paths) and plain columns.
+        const byCat = (c) => battery.filter((x) => x.category === c).length;
+        for (const cat of ['own', 'fk', 'assoc-path', 'invalid']) {
+            assert.ok(byCat(cat) > 0, `differential battery has no '${cat}' cases — that generator may have been removed`);
+        }
+        assert.ok(battery.length >= 20, `differential battery too small (${battery.length}) — oracle may have been stubbed to a no-op`);
     });
 
     it('validateCqlQuery agrees with the model on every battery case', () => {

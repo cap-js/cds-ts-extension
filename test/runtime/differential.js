@@ -62,12 +62,16 @@ function deriveTruth(flavors) {
  * @typedef {object} BatteryCase
  * @property {string} query       full CQL query text (FQN form, no service prefix)
  * @property {boolean} valid      whether the model says this query is valid
+ * @property {'own' | 'fk' | 'assoc-path' | 'invalid'} category  case category (for per-category anti-rot floors)
  * @property {string} why         short label for diagnostics
  */
 
 /**
  * Generate a diff battery from the truth model: for every entity, a valid query
- * per own-element / FK / single-hop assoc path, plus a known-invalid ghost ref.
+ * per own-element, per synthesized FK, and per single-hop association-path
+ * terminal element, plus a known-invalid ghost ref. Every valid reference is
+ * emitted (no sampling) so a regression in any one is caught; cases are tagged
+ * by category so the caller can enforce that each category is non-empty.
  * @param {Map<string, TruthEntity>} truth
  * @returns {BatteryCase[]}
  */
@@ -78,23 +82,24 @@ function buildBattery(truth) {
         for (const col of own) {
             // Associations are not scalar columns; a bare assoc ref is a separate concern.
             if (assocs.has(col)) continue;
-            cases.push({ query: `SELECT ${col} FROM ${fqn}`, valid: true, why: `${fqn}.${col} (own)` });
+            cases.push({ query: `SELECT ${col} FROM ${fqn}`, valid: true, category: 'own', why: `${fqn}.${col} (own)` });
         }
         for (const fk of fks) {
-            cases.push({ query: `SELECT ${fk} FROM ${fqn}`, valid: true, why: `${fqn}.${fk} (fk)` });
+            cases.push({ query: `SELECT ${fk} FROM ${fqn}`, valid: true, category: 'fk', why: `${fqn}.${fk} (fk)` });
         }
         for (const [assoc, target] of assocs) {
             const targetEntity = truth.get(target);
             if (!targetEntity) continue;
+            // Every terminal scalar element of the association target — not just the
+            // first — so a regression affecting any later element is caught.
             for (const tcol of targetEntity.own) {
                 if (targetEntity.assocs.has(tcol)) continue;
-                cases.push({ query: `SELECT ${assoc}.${tcol} FROM ${fqn}`, valid: true, why: `${fqn}.${assoc}.${tcol} (assoc-path)` });
-                break; // one representative path per association keeps the battery bounded
+                cases.push({ query: `SELECT ${assoc}.${tcol} FROM ${fqn}`, valid: true, category: 'assoc-path', why: `${fqn}.${assoc}.${tcol} (assoc-path)` });
             }
         }
         // A ghost column that is provably absent from every legitimate reference.
         const ghost = ghostName(own, fks);
-        cases.push({ query: `SELECT ${ghost} FROM ${fqn}`, valid: false, why: `${fqn}.${ghost} (ghost → must be flagged)` });
+        cases.push({ query: `SELECT ${ghost} FROM ${fqn}`, valid: false, category: 'invalid', why: `${fqn}.${ghost} (ghost → must be flagged)` });
     }
     return cases;
 }
