@@ -730,6 +730,47 @@ describe('validateCqlQuery', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Synthesized managed-association foreign-key columns (`<assoc>_<key>`) are
+// valid field references in SELECT, even though they are not top-level elements
+// in the unresolved CSN.
+// ---------------------------------------------------------------------------
+
+describe('validateCqlQuery — synthesized FK columns', () => {
+    const model = {
+        'Svc.Books': {
+            kind: 'entity',
+            elements: {
+                ID: { type: 'cds.UUID' },
+                title: { type: 'cds.String' },
+                author: { type: 'cds.Association', target: 'Svc.Authors', keys: [{ ref: ['ID'] }] },
+            },
+        },
+        'Svc.Authors': {
+            kind: 'entity',
+            elements: { ID: { type: 'cds.UUID' }, name: { type: 'cds.String' } },
+        },
+    };
+
+    it('accepts a bare synthesized FK column (author_ID)', () => {
+        assert.deepEqual(validateCqlQuery('SELECT author_ID FROM Books', model, 'Svc'), []);
+    });
+
+    it('accepts a synthesized FK column alongside real fields', () => {
+        assert.deepEqual(validateCqlQuery('SELECT ID, author_ID, title FROM Books', model, 'Svc'), []);
+    });
+
+    it('accepts an alias-qualified synthesized FK column (b.author_ID)', () => {
+        assert.deepEqual(validateCqlQuery('SELECT b.author_ID FROM Books as b', model, 'Svc'), []);
+    });
+
+    it('still reports an FK-looking name with no backing association', () => {
+        const errs = validateCqlQuery('SELECT ghost_ID FROM Books', model, 'Svc');
+        assert.equal(errs.length, 1);
+        assert.equal(errs[0].code, CqlDiagnosticCode.UnknownField);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Draft shadow entities (`<Entity>.drafts`) — not in the compiled CSN, so a
 // trailing `.drafts` is stripped and resolved against the base entity.
 // ---------------------------------------------------------------------------

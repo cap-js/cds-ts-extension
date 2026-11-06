@@ -33,5 +33,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Eliminated false-positive `Unknown field` diagnostics on aggregate/scalar function names (e.g. `max`, `count`) used in SELECT columns.
 - Eliminated false-positive `Unknown entity or view` diagnostics on draft shadow entities (`<Entity>.drafts`).
 - Inline-dot expands (`` cds.ql`SELECT from Books { author.{ name } }` ``) now resolve correctly for completions and diagnostics at any nesting depth. Previously the association head (`author.`) retained its trailing dot, so completions inside the block returned nothing and the head itself was mis-flagged as an `Unknown field`.
+- Synthesized managed-association foreign-key columns (e.g. `author_ID` for an association `author`) are now accepted as valid fields in `SELECT` column and `WHERE` validation. Previously only the write-statement path recognised them, so a `` cds.ql`SELECT author_ID FROM Books` `` was mis-flagged `Unknown field`. Field validation and ambiguity detection now build their element sets from `elementNamesWithForeignKeys`, matching the write path.
 
 ### Security
