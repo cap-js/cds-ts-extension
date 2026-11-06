@@ -1,5 +1,7 @@
 # @cap-js/cds-ts-extension
 
+[![REUSE status](https://api.reuse.software/badge/github.com/cap-js/cds-ts-extension)](https://api.reuse.software/info/github.com/cap-js/cds-ts-extension)
+
 A [TypeScript Language Service Plugin](https://github.com/microsoft/TypeScript/wiki/Writing-a-Language-Service-Plugin)
 that provides CQL-aware completions, hover, diagnostics, and type inference inside
 `` cds.ql`...` `` tagged template literals in `.js`/`.ts` files.
