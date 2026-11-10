@@ -3729,8 +3729,6 @@ describe('CqlHover — write statement result variable hover', () => {
     });
 });
 
-
-
 describe('PersistentWorkerPool — end-to-end', () => {
     // Atomics.wait is permitted on the main thread in node:test (only worker
     // threads cannot call it). We call _runWorker/_runBatchWorker directly so

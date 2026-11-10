@@ -357,7 +357,10 @@ function getCqlHover(fileName, position, ctx, typescript) {
                         const writeMatch2 = WRITE_STATEMENT_RE.exec(extractTemplateText(typescript, source.template));
                         const rowType = writeMatch2
                             ? writeStatementValueType(/** @type {'UPDATE'|'DELETE'|'INSERT'|'UPSERT'} */ (/** @type {string} */ (writeMatch2[1]).toUpperCase()))
-                            : (() => { const b = buildHoverRowBody(source.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger); return b === null ? 'unknown' : `{ ${b} }`; })();
+                            : (() => {
+                                  const b = buildHoverRowBody(source.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger);
+                                  return b === null ? 'unknown' : `{ ${b} }`;
+                              })();
                         return {
                             kind: typescript.ScriptElementKind.variableElement,
                             kindModifiers: '',

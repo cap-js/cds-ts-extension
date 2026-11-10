@@ -3779,21 +3779,10 @@ describe('rewriteSnapshot — write statements in cacheOnly mode', () => {
     const noWorker = () => assert.fail('worker must not be called for write statements');
 
     it('UPDATE and DELETE are rewritten even when typeExprCache is empty (cacheOnly)', () => {
-        const src = [
-            'const z = await cds.ql`DELETE FROM Books WHERE ID = 1`',
-            'const t = await cds.ql`UPDATE Books SET title = "x"`',
-            'export {};',
-        ].join('\n');
+        const src = ['const z = await cds.ql`DELETE FROM Books WHERE ID = 1`', 'const t = await cds.ql`UPDATE Books SET title = "x"`', 'export {};'].join('\n');
         const typeExprCache = new Map(); // cold — no prior entries
-        const rewritten = rewriteSnapshot(
-            'test.js', src, TS,
-            new Map(), new Map(),
-            noWorker, noWorker,
-            logger, '/proj', undefined, undefined,
-            { typeExprCache, cacheOnly: true },
-        );
-        assert.ok(rewritten.includes('_q0') || rewritten.includes('_q1') || rewritten.includes('_q2'),
-            'at least one write-statement alias must be placed in cacheOnly mode');
+        const rewritten = rewriteSnapshot('test.js', src, TS, new Map(), new Map(), noWorker, noWorker, logger, '/proj', undefined, undefined, { typeExprCache, cacheOnly: true });
+        assert.ok(rewritten.includes('_q0') || rewritten.includes('_q1') || rewritten.includes('_q2'), 'at least one write-statement alias must be placed in cacheOnly mode');
         assert.ok(rewritten.includes('number'), 'alias type must be number');
     });
 });
@@ -5111,17 +5100,17 @@ describe('getSuggestions — completion coverage table', () => {
         'Svc.Books': {
             kind: 'entity',
             elements: {
-                ID:     { type: 'cds.UUID' },
-                title:  { type: 'cds.String' },
-                stock:  { type: 'cds.Integer' },
+                ID: { type: 'cds.UUID' },
+                title: { type: 'cds.String' },
+                stock: { type: 'cds.Integer' },
                 author: { type: 'cds.Association', target: 'Svc.Authors' },
             },
         },
         'Svc.Authors': {
             kind: 'entity',
             elements: {
-                ID:      { type: 'cds.UUID' },
-                name:    { type: 'cds.String' },
+                ID: { type: 'cds.UUID' },
+                name: { type: 'cds.String' },
                 address: { type: 'cds.Association', target: 'Svc.Addresses' },
             },
         },
@@ -5129,7 +5118,7 @@ describe('getSuggestions — completion coverage table', () => {
             kind: 'entity',
             elements: {
                 street: { type: 'cds.String' },
-                city:   { type: 'cds.String' },
+                city: { type: 'cds.String' },
             },
         },
     };
@@ -5145,91 +5134,99 @@ describe('getSuggestions — completion coverage table', () => {
             assert.ok(cursor !== -1, `row missing | cursor marker: ${q}`);
             const query = q.slice(0, cursor) + q.slice(cursor + 1);
             const items = getSuggestions(query, cursor, TABLE_DEFS, PREFIX);
-            const ls    = items.map((i) => i.label);
-            const ks    = [...new Set(items.map((i) => i.kind))];
-            const ctx   = note ? ` (${note})` : '';
-            for (const m of must)
-                assert.ok(ls.includes(m),  `[${q}]${ctx}: expected "${m}" in [${ls.join(', ')}]`);
-            for (const m of mustNot)
-                assert.ok(!ls.includes(m), `[${q}]${ctx}: did not expect "${m}" in [${ls.join(', ')}]`);
-            for (const k of mustKinds)
-                assert.ok(ks.includes(k),  `[${q}]${ctx}: expected kind "${k}" in [${ks.join(', ')}]`);
+            const ls = items.map((i) => i.label);
+            const ks = [...new Set(items.map((i) => i.kind))];
+            const ctx = note ? ` (${note})` : '';
+            for (const m of must) assert.ok(ls.includes(m), `[${q}]${ctx}: expected "${m}" in [${ls.join(', ')}]`);
+            for (const m of mustNot) assert.ok(!ls.includes(m), `[${q}]${ctx}: did not expect "${m}" in [${ls.join(', ')}]`);
+            for (const k of mustKinds) assert.ok(ks.includes(k), `[${q}]${ctx}: expected kind "${k}" in [${ks.join(', ')}]`);
         }
     }
 
-    it('SELECT clause — fields and clause keywords', () => runTable([
-        { q: 'SELECT | FROM Books',             must: ['ID', 'title', 'stock'],           mustNot: ['name'] },
-        { q: 'SELECT ID, | FROM Books',         must: ['ID', 'title'],                    note: 'after comma' },
-        { q: 'SELECT DISTINCT | FROM Books',    must: ['ID', 'title'],                    note: 'after DISTINCT' },
-        { q: 'SELECT ID FROM Books |',          must: ['WHERE', 'ORDER BY', 'JOIN', 'LEFT JOIN', 'GROUP BY', 'HAVING', 'LIMIT'] },
-        { q: 'SELECT ID FROM Books |',          mustNot: ['SELECT', 'DELETE'],            note: 'no statement starters after named source' },
-        { q: 'SELECT ID |',                     must: ['FROM'],     mustKinds: ['keyword'] },
-    ]));
+    it('SELECT clause — fields and clause keywords', () =>
+        runTable([
+            { q: 'SELECT | FROM Books', must: ['ID', 'title', 'stock'], mustNot: ['name'] },
+            { q: 'SELECT ID, | FROM Books', must: ['ID', 'title'], note: 'after comma' },
+            { q: 'SELECT DISTINCT | FROM Books', must: ['ID', 'title'], note: 'after DISTINCT' },
+            { q: 'SELECT ID FROM Books |', must: ['WHERE', 'ORDER BY', 'JOIN', 'LEFT JOIN', 'GROUP BY', 'HAVING', 'LIMIT'] },
+            { q: 'SELECT ID FROM Books |', mustNot: ['SELECT', 'DELETE'], note: 'no statement starters after named source' },
+            { q: 'SELECT ID |', must: ['FROM'], mustKinds: ['keyword'] },
+        ]));
 
-    it('WHERE clause — fields and boolean keywords', () => runTable([
-        { q: 'SELECT ID FROM Books WHERE |',            must: ['ID', 'title', 'stock'] },
-        { q: 'SELECT ID FROM Books WHERE ID = 1 |',     must: ['AND', 'OR', 'NOT', 'LIKE', 'IS'] },
-        { q: 'SELECT ID FROM Books WHERE |',            mustNot: ['WHERE'],   note: 'WHERE not repeated' },
-    ]));
+    it('WHERE clause — fields and boolean keywords', () =>
+        runTable([
+            { q: 'SELECT ID FROM Books WHERE |', must: ['ID', 'title', 'stock'] },
+            { q: 'SELECT ID FROM Books WHERE ID = 1 |', must: ['AND', 'OR', 'NOT', 'LIKE', 'IS'] },
+            { q: 'SELECT ID FROM Books WHERE |', mustNot: ['WHERE'], note: 'WHERE not repeated' },
+        ]));
 
-    it('ORDER BY clause — fields and direction keywords', () => runTable([
-        { q: 'SELECT ID FROM Books ORDER BY |',             must: ['ID', 'title', 'stock'] },
-        { q: 'SELECT ID FROM Books ORDER BY ID |',          must: ['ASC', 'DESC'] },
-        { q: 'SELECT ID FROM Books ORDER BY ID ASC |',      must: ['ID', 'title'],   note: 'next field after direction' },
-    ]));
+    it('ORDER BY clause — fields and direction keywords', () =>
+        runTable([
+            { q: 'SELECT ID FROM Books ORDER BY |', must: ['ID', 'title', 'stock'] },
+            { q: 'SELECT ID FROM Books ORDER BY ID |', must: ['ASC', 'DESC'] },
+            { q: 'SELECT ID FROM Books ORDER BY ID ASC |', must: ['ID', 'title'], note: 'next field after direction' },
+        ]));
 
-    it('GROUP BY / HAVING clauses', () => runTable([
-        { q: 'SELECT ID FROM Books GROUP BY |',                     must: ['ID', 'title', 'stock'],  note: 'GROUP BY fields' },
-        { q: 'SELECT ID FROM Books GROUP BY ID HAVING |',           must: ['ID', 'title'],           note: 'HAVING fields' },
-        { q: 'SELECT ID FROM Books GROUP BY ID HAVING ID = 1 |',    must: ['AND', 'OR'],             note: 'HAVING boolean ops' },
-    ]));
+    it('GROUP BY / HAVING clauses', () =>
+        runTable([
+            { q: 'SELECT ID FROM Books GROUP BY |', must: ['ID', 'title', 'stock'], note: 'GROUP BY fields' },
+            { q: 'SELECT ID FROM Books GROUP BY ID HAVING |', must: ['ID', 'title'], note: 'HAVING fields' },
+            { q: 'SELECT ID FROM Books GROUP BY ID HAVING ID = 1 |', must: ['AND', 'OR'], note: 'HAVING boolean ops' },
+        ]));
 
-    it('JOIN — entity completions and ON clause fields', () => runTable([
-        { q: 'SELECT ID FROM Books JOIN |',             must: ['Books', 'Authors'],     mustKinds: ['entity'],  note: 'JOIN entity' },
-        { q: 'SELECT ID FROM Books LEFT JOIN |',        must: ['Books', 'Authors'],                             note: 'LEFT JOIN entity' },
-        { q: 'SELECT ID FROM Books JOIN Authors ON |',  must: ['ID', 'title', 'name'],                         note: 'ON fields from both sources' },
-    ]));
+    it('JOIN — entity completions and ON clause fields', () =>
+        runTable([
+            { q: 'SELECT ID FROM Books JOIN |', must: ['Books', 'Authors'], mustKinds: ['entity'], note: 'JOIN entity' },
+            { q: 'SELECT ID FROM Books LEFT JOIN |', must: ['Books', 'Authors'], note: 'LEFT JOIN entity' },
+            { q: 'SELECT ID FROM Books JOIN Authors ON |', must: ['ID', 'title', 'name'], note: 'ON fields from both sources' },
+        ]));
 
-    it('postfix projection — fields inside block and keywords after closing brace', () => runTable([
-        { q: 'SELECT FROM Books { | }',             must: ['ID', 'title', 'author'],  mustNot: ['WHERE'],             note: 'inside block: fields, no keywords' },
-        { q: 'SELECT FROM Books { ID } |',          must: ['WHERE', 'ORDER BY', 'JOIN'],                              note: 'after }: transition keywords' },
-        { q: 'SELECT FROM Books { ID } |',          mustNot: ['SELECT', 'DELETE'],                                    note: 'after }: no statement starters' },
-        { q: 'SELECT FROM Books { ID } WHERE |',    must: ['ID', 'title', 'stock'],                                   note: 'WHERE after postfix block' },
-        { q: 'SELECT FROM Books { ID } ORDER BY |', must: ['ID', 'title'],                                            note: 'ORDER BY after postfix block' },
-    ]));
+    it('postfix projection — fields inside block and keywords after closing brace', () =>
+        runTable([
+            { q: 'SELECT FROM Books { | }', must: ['ID', 'title', 'author'], mustNot: ['WHERE'], note: 'inside block: fields, no keywords' },
+            { q: 'SELECT FROM Books { ID } |', must: ['WHERE', 'ORDER BY', 'JOIN'], note: 'after }: transition keywords' },
+            { q: 'SELECT FROM Books { ID } |', mustNot: ['SELECT', 'DELETE'], note: 'after }: no statement starters' },
+            { q: 'SELECT FROM Books { ID } WHERE |', must: ['ID', 'title', 'stock'], note: 'WHERE after postfix block' },
+            { q: 'SELECT FROM Books { ID } ORDER BY |', must: ['ID', 'title'], note: 'ORDER BY after postfix block' },
+        ]));
 
-    it('nested expand — fields scoped to association target', () => runTable([
-        { q: 'SELECT FROM Books { author { | } }',          must: ['name', 'address'],  mustNot: ['title', 'stock'],  note: 'Authors fields in expand' },
-        { q: 'SELECT FROM Books { author { address { | } } }', must: ['street', 'city'], mustNot: ['name', 'title'],  note: 'Addresses fields at depth 2' },
-        { q: 'SELECT FROM Books { author.{ | } }',          must: ['name', 'address'],  mustNot: ['title'],           note: 'inline-dot expand' },
-    ]));
+    it('nested expand — fields scoped to association target', () =>
+        runTable([
+            { q: 'SELECT FROM Books { author { | } }', must: ['name', 'address'], mustNot: ['title', 'stock'], note: 'Authors fields in expand' },
+            { q: 'SELECT FROM Books { author { address { | } } }', must: ['street', 'city'], mustNot: ['name', 'title'], note: 'Addresses fields at depth 2' },
+            { q: 'SELECT FROM Books { author.{ | } }', must: ['name', 'address'], mustNot: ['title'], note: 'inline-dot expand' },
+        ]));
 
-    it('DELETE statement', () => runTable([
-        { q: 'DELETE |',                            must: ['FROM'],                     mustKinds: ['keyword'] },
-        { q: 'DELETE FROM |',                       must: ['Books', 'Authors'],         mustKinds: ['entity'] },
-        { q: 'DELETE FROM Books |',                 must: ['WHERE'],                    mustNot: ['SET'] },
-        { q: 'DELETE FROM Books WHERE |',           must: ['ID', 'title', 'stock'],     note: 'WHERE fields in DELETE' },
-        { q: 'DELETE FROM Books WHERE ID = 1 |',    must: ['AND', 'OR'],                note: 'boolean ops in DELETE WHERE' },
-    ]));
+    it('DELETE statement', () =>
+        runTable([
+            { q: 'DELETE |', must: ['FROM'], mustKinds: ['keyword'] },
+            { q: 'DELETE FROM |', must: ['Books', 'Authors'], mustKinds: ['entity'] },
+            { q: 'DELETE FROM Books |', must: ['WHERE'], mustNot: ['SET'] },
+            { q: 'DELETE FROM Books WHERE |', must: ['ID', 'title', 'stock'], note: 'WHERE fields in DELETE' },
+            { q: 'DELETE FROM Books WHERE ID = 1 |', must: ['AND', 'OR'], note: 'boolean ops in DELETE WHERE' },
+        ]));
 
-    it('UPDATE statement', () => runTable([
-        { q: 'UPDATE |',                                must: ['Books', 'Authors'],         mustKinds: ['entity'] },
-        { q: 'UPDATE Books |',                          must: ['SET', 'WHERE'] },
-        { q: 'UPDATE Books SET |',                      must: ['ID', 'title', 'stock'],     mustKinds: ['field'],   note: 'SET lhs fields' },
-        { q: 'UPDATE Books SET |',                      must: ['WHERE'],                    mustKinds: ['keyword'], note: 'WHERE offered alongside fields' },
-        { q: 'UPDATE Books SET title = 1 |',            must: ['WHERE', 'ID'],              note: 'more fields or WHERE' },
-        { q: 'UPDATE Books SET title = 1 WHERE |',      must: ['ID', 'title', 'stock'],     note: 'WHERE fields in UPDATE' },
-    ]));
+    it('UPDATE statement', () =>
+        runTable([
+            { q: 'UPDATE |', must: ['Books', 'Authors'], mustKinds: ['entity'] },
+            { q: 'UPDATE Books |', must: ['SET', 'WHERE'] },
+            { q: 'UPDATE Books SET |', must: ['ID', 'title', 'stock'], mustKinds: ['field'], note: 'SET lhs fields' },
+            { q: 'UPDATE Books SET |', must: ['WHERE'], mustKinds: ['keyword'], note: 'WHERE offered alongside fields' },
+            { q: 'UPDATE Books SET title = 1 |', must: ['WHERE', 'ID'], note: 'more fields or WHERE' },
+            { q: 'UPDATE Books SET title = 1 WHERE |', must: ['ID', 'title', 'stock'], note: 'WHERE fields in UPDATE' },
+        ]));
 
-    it('INSERT / UPSERT statement', () => runTable([
-        { q: 'INSERT |',            must: ['INTO'],                             mustKinds: ['keyword'] },
-        { q: 'UPSERT |',            must: ['INTO'],                             mustKinds: ['keyword'] },
-        { q: 'INSERT INTO |',       must: ['Books', 'Authors'],                 mustKinds: ['entity'] },
-        { q: 'INSERT INTO Books |', must: ['VALUES', 'ENTRIES', 'SET', 'COLUMNS'] },
-    ]));
+    it('INSERT / UPSERT statement', () =>
+        runTable([
+            { q: 'INSERT |', must: ['INTO'], mustKinds: ['keyword'] },
+            { q: 'UPSERT |', must: ['INTO'], mustKinds: ['keyword'] },
+            { q: 'INSERT INTO |', must: ['Books', 'Authors'], mustKinds: ['entity'] },
+            { q: 'INSERT INTO Books |', must: ['VALUES', 'ENTRIES', 'SET', 'COLUMNS'] },
+        ]));
 
-    it('statement start — opening keywords only', () => runTable([
-        { q: '|',       must: ['SELECT', 'INSERT', 'UPDATE', 'UPSERT', 'DELETE'],  mustKinds: ['keyword'] },
-        { q: '   |',    must: ['SELECT', 'UPDATE', 'DELETE'],                       note: 'leading whitespace' },
-    ]));
+    it('statement start — opening keywords only', () =>
+        runTable([
+            { q: '|', must: ['SELECT', 'INSERT', 'UPDATE', 'UPSERT', 'DELETE'], mustKinds: ['keyword'] },
+            { q: '   |', must: ['SELECT', 'UPDATE', 'DELETE'], note: 'leading whitespace' },
+        ]));
 });
