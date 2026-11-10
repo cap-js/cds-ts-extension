@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   release:
-    uses: cap-js/.github/.github/workflows/release.yml@main
+    uses: cap-js/.github/.github/workflows/release.yml@d7f6729c11a3aff1d1e2704df8d1ac47bb2fd927
     secrets: inherit
     with:
       dry-run: ${{ fromJSON(github.event.inputs.dry-run || 'false') }}
