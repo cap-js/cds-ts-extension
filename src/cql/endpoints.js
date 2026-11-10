@@ -243,7 +243,7 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
                                 const ref = k.ref;
                                 if (!ref?.length) continue;
                                 const fkName = `${name}_${ref.join('_')}`;
-                                const keyEl = targetArtifact?.elements?.[ref[0]];
+                                const keyEl = targetArtifact?.elements?.[/** @type {string} */ (ref[0])];
                                 const fkType = keyEl ? (resolveBaseType(/** @type {any} */ (keyEl).type, defs) ?? '') : '';
                                 items.push({ label: fkName, kind: 'field', detail: fkType, entity: fqn });
                             }
