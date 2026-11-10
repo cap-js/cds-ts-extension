@@ -153,7 +153,9 @@ describe('runtime assumptions', () => {
                     SELECT: { from: { ref: ['rt.Books'] }, columns: [{ func: 'count', args: ['*'], as: 'n' }] },
                 });
                 const scalars = await db.run({ SELECT: { from: { ref: ['rt.Scalars'] } } });
-                return { toMany, toOne, flat, agg, scalars: scalars[0] };
+                const upd = await db.run(cds.ql.UPDATE('rt.Books').set({ title: 'B' }).where({ ID: 10 }));
+                const del = await db.run(cds.ql.DELETE.from('rt.Books').where({ ID: 11 }));
+                return { toMany, toOne, flat, agg, scalars: scalars[0], upd, del };
             });
         } catch (err) {
             if (err instanceof SqliteUnavailable) {
@@ -184,6 +186,10 @@ describe('runtime assumptions', () => {
 
         // Aggregate shape.
         schemas.AggregateRow.parse(live.agg[0]);
+
+        // UPDATE/DELETE return number (affected-row count) — plugin claims 'number'.
+        assert.equal(typeof live.upd, 'number', 'UPDATE must return a number');
+        assert.equal(typeof live.del, 'number', 'DELETE must return a number');
 
         // cdsTypeToTs claim vs live typeof, per scalar element.
         const scalarEls = raw['rt.Scalars'].elements;

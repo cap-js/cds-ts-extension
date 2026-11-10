@@ -4,7 +4,7 @@
 
 /** @typedef {import('./CqlLogic').CompletionEntry} CompletionEntry */
 const { cdsTypeToTs, CQL_KEYWORDS, extractSourceRelations, getTokenContext, tokenizeCql } = require('./CqlLogic');
-const { extractTemplateText, findCdsQueryTemplate, offsetInTemplate, resolveRowTypeBody, resolveToCdsQuery } = require('./CqlTypeRewriter');
+const { extractTemplateText, findCdsQueryTemplate, offsetInTemplate, resolveRowTypeBody, resolveToCdsQuery, writeStatementValueType, WRITE_STATEMENT_RE } = require('./CqlTypeRewriter');
 /** @typedef {import('./CqlTypeRewriter').CqlTemplateRef} CqlTemplateRef */
 const { parseCqlColumns } = require('./CqlLogic');
 const { isCdsQueryTag, isScopeBoundary, isNamedVarDecl, unwrapAwait } = require('./TsAstHelpers');
@@ -294,9 +294,17 @@ function getCqlHover(fileName, position, ctx, typescript) {
         if (typescript.isIdentifier(leafNode)) {
             const resolved = resolveToCdsQuery(typescript, origSf, position);
             if (resolved) {
-                const rowBody = buildHoverRowBody(resolved.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger);
-                const typeStr = rowBody === null ? 'unknown' : `{ ${rowBody} }[]`;
-                const displayType = resolved.awaited ? typeStr : `Promise<${typeStr}>`;
+                const queryText = extractTemplateText(typescript, resolved.template);
+                const writeMatch = WRITE_STATEMENT_RE.exec(queryText);
+                let displayType;
+                if (writeMatch) {
+                    const value = writeStatementValueType(/** @type {'UPDATE'|'DELETE'|'INSERT'|'UPSERT'} */ (writeMatch[1].toUpperCase()));
+                    displayType = resolved.awaited ? value : `Promise<${value}>`;
+                } else {
+                    const rowBody = buildHoverRowBody(resolved.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger);
+                    const typeStr = rowBody === null ? 'unknown' : `{ ${rowBody} }[]`;
+                    displayType = resolved.awaited ? typeStr : `Promise<${typeStr}>`;
+                }
                 const span = {
                     start: leafNode.getStart(origSf),
                     length: leafNode.getWidth(origSf),
@@ -346,8 +354,10 @@ function getCqlHover(fileName, position, ctx, typescript) {
                         }
                     } else {
                         // const [fst] = ... or const [r1] = result → show row type
-                        const rowBody = buildHoverRowBody(source.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger);
-                        const rowType = rowBody === null ? 'unknown' : `{ ${rowBody} }`;
+                        const writeMatch2 = WRITE_STATEMENT_RE.exec(extractTemplateText(typescript, source.template));
+                        const rowType = writeMatch2
+                            ? writeStatementValueType(/** @type {'UPDATE'|'DELETE'|'INSERT'|'UPSERT'} */ (writeMatch2[1].toUpperCase()))
+                            : (() => { const b = buildHoverRowBody(source.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger); return b === null ? 'unknown' : `{ ${b} }`; })();
                         return {
                             kind: typescript.ScriptElementKind.variableElement,
                             kindModifiers: '',
