@@ -235,6 +235,19 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
                         const el = element;
                         const doc = csnText(el.doc) ?? el['@description']?.val ?? el['@title']?.val ?? undefined;
                         items.push({ label: name, kind: 'field', detail: resolveBaseType(el.type, defs) ?? '', entity: fqn, doc });
+                        // Synthesized FK columns: `<assoc>_<keyRef>` — emit one entry per key ref.
+                        const keys = /** @type {Array<{ ref?: string[] }> | undefined} */ (/** @type {any} */ (el).keys);
+                        if (keys && el.target) {
+                            const targetArtifact = defs[el.target];
+                            for (const k of keys) {
+                                const ref = k.ref;
+                                if (!ref?.length) continue;
+                                const fkName = `${name}_${ref.join('_')}`;
+                                const keyEl = targetArtifact?.elements?.[ref[0]];
+                                const fkType = keyEl ? (resolveBaseType(/** @type {any} */ (keyEl).type, defs) ?? '') : '';
+                                items.push({ label: fkName, kind: 'field', detail: fkType, entity: fqn });
+                            }
+                        }
                     }
                 }
                 items.push({ label: 'WHERE', kind: 'keyword', detail: 'keyword' });

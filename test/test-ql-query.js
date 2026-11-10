@@ -575,6 +575,22 @@ describe('getSuggestions — write statements', () => {
         assert.ok(l.includes('ID'));
     });
 
+    it('UPDATE <entity> SET … → synthesized FK column offered alongside own elements', () => {
+        const modelWithAssoc = {
+            'Svc.Books': {
+                kind: 'entity',
+                elements: {
+                    ID: { type: 'cds.UUID' },
+                    title: { type: 'cds.String' },
+                    author: { type: 'cds.Association', target: 'Svc.Authors', keys: [{ ref: ['ID'] }] },
+                },
+            },
+            'Svc.Authors': { kind: 'entity', elements: { ID: { type: 'cds.UUID' }, name: { type: 'cds.String' } } },
+        };
+        const ls = getSuggestions('UPDATE Books SET ', 'UPDATE Books SET '.length, modelWithAssoc, 'Svc').map((i) => i.label);
+        includesAll(ls, ['ID', 'title', 'author_ID', 'WHERE']);
+    });
+
     it('INSERT → INTO', () => {
         assert.deepEqual(labels('INSERT '), ['INTO']);
     });
@@ -5127,7 +5143,7 @@ describe('getSuggestions — completion coverage table', () => {
         for (const { q, must = [], mustNot = [], mustKinds = [], note } of rows) {
             const cursor = q.indexOf('|');
             assert.ok(cursor !== -1, `row missing | cursor marker: ${q}`);
-            const query = q.replace('|', '');
+            const query = q.slice(0, cursor) + q.slice(cursor + 1);
             const items = getSuggestions(query, cursor, TABLE_DEFS, PREFIX);
             const ls    = items.map((i) => i.label);
             const ks    = [...new Set(items.map((i) => i.kind))];

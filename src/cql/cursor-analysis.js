@@ -180,9 +180,19 @@ function getCursorClause(tokens, cursorOffset) {
                 expandStack.pop();
                 braceDepth--;
                 if (braceDepth === 0) {
-                    // Closed the outermost projection block — back to post-FROM context
-                    // where WHERE / ORDER BY / JOIN / … can follow.
-                    clause = { kind: 'from-source' };
+                    // Closed the outermost brace. In postfix SELECT, return to
+                    // post-FROM context (WHERE / ORDER BY / JOIN / … can follow).
+                    // In write-statement object forms (UPDATE SET { } / INSERT ENTRIES { })
+                    // return to the corresponding body state, not from-source.
+                    if (postfixMode) {
+                        clause = { kind: 'from-source' };
+                    } else if (writeKind === 'update') {
+                        clause = { kind: 'update-body', hasSet: true, sources: clause.kind === 'update-body' ? clause.sources : [] };
+                    } else if (writeKind === 'insert') {
+                        clause = { kind: 'insert-body' };
+                    } else {
+                        clause = { kind: 'unknown' };
+                    }
                 } else {
                     clause = {
                         kind: 'select-item',

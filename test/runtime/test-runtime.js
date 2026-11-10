@@ -131,7 +131,7 @@ describe('runtime assumptions', () => {
 
         let live;
         try {
-            live = await withSqlite(flavors.raw, seed, async (db) => {
+            live = await withSqlite(flavors.raw, seed, async (db, cdsApi) => {
                 const toMany = await db.run({
                     SELECT: {
                         from: { ref: ['rt.Authors'] },
@@ -153,8 +153,8 @@ describe('runtime assumptions', () => {
                     SELECT: { from: { ref: ['rt.Books'] }, columns: [{ func: 'count', args: ['*'], as: 'n' }] },
                 });
                 const scalars = await db.run({ SELECT: { from: { ref: ['rt.Scalars'] } } });
-                const upd = await db.run(cds.ql.UPDATE('rt.Books').set({ title: 'B' }).where({ ID: 10 }));
-                const del = await db.run(cds.ql.DELETE.from('rt.Books').where({ ID: 11 }));
+                const upd = await db.run(cdsApi.ql.UPDATE('rt.Books').set({ title: 'B' }).where({ ID: 10 }));
+                const del = await db.run(cdsApi.ql.DELETE.from('rt.Books').where({ ID: 11 }));
                 return { toMany, toOne, flat, agg, scalars: scalars[0], upd, del };
             });
         } catch (err) {
