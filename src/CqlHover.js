@@ -298,7 +298,7 @@ function getCqlHover(fileName, position, ctx, typescript) {
                 const writeMatch = WRITE_STATEMENT_RE.exec(queryText);
                 let displayType;
                 if (writeMatch) {
-                    const value = writeStatementValueType(/** @type {'UPDATE'|'DELETE'|'INSERT'|'UPSERT'} */ (writeMatch[1].toUpperCase()));
+                    const value = writeStatementValueType(/** @type {'UPDATE'|'DELETE'|'INSERT'|'UPSERT'} */ (/** @type {string} */ (writeMatch[1]).toUpperCase()));
                     displayType = resolved.awaited ? value : `Promise<${value}>`;
                 } else {
                     const rowBody = buildHoverRowBody(resolved.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger);
@@ -356,7 +356,7 @@ function getCqlHover(fileName, position, ctx, typescript) {
                         // const [fst] = ... or const [r1] = result → show row type
                         const writeMatch2 = WRITE_STATEMENT_RE.exec(extractTemplateText(typescript, source.template));
                         const rowType = writeMatch2
-                            ? writeStatementValueType(/** @type {'UPDATE'|'DELETE'|'INSERT'|'UPSERT'} */ (writeMatch2[1].toUpperCase()))
+                            ? writeStatementValueType(/** @type {'UPDATE'|'DELETE'|'INSERT'|'UPSERT'} */ (/** @type {string} */ (writeMatch2[1]).toUpperCase()))
                             : (() => { const b = buildHoverRowBody(source.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger); return b === null ? 'unknown' : `{ ${b} }`; })();
                         return {
                             kind: typescript.ScriptElementKind.variableElement,
