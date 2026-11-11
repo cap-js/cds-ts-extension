@@ -5,7 +5,9 @@
  * and logs a warning for each invalid query.
  */
 
-const cds = require('@sap/cds');
+// Resolve @sap/cds from the project root so we share the singleton that
+// cds-dk already augmented with .build — not the copy in our own node_modules.
+const cds = require(require.resolve('@sap/cds', { paths: [process.cwd(), __dirname] }));
 const ts = require('typescript');
 const { readdirSync, readFileSync, statSync } = require('node:fs');
 const { join, extname } = require('node:path');
@@ -107,7 +109,7 @@ function runScan(root, defs) {
 
 if (cds.build) {
     class CqlValidatorTask extends cds.build.Plugin {
-        static get hasTask() {
+        static hasTask() {
             return true;
         }
 
