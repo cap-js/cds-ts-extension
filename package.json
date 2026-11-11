@@ -1,6 +1,6 @@
 {
     "name": "@cap-js/cds-ts-extension",
-    "version": "0.0.1",
+    "version": "0.1.0",
     "description": "TypeScript Language Service Plugin providing CQL-aware completions, hover, diagnostics, and type inference inside cds.ql`...` tagged template literals.",
     "keywords": [
         "CAP",
