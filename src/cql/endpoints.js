@@ -221,9 +221,38 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
             // UPDATE <entity>: the target is an entity (no INTO/FROM in UPDATE).
             return entitySuggestions(defs, prefix);
 
-        case 'update-body':
-            // UPDATE <entity> …: SET (unless already present) and WHERE.
-            return (clause.hasSet ? ['WHERE'] : ['SET', 'WHERE']).map((label) => ({ label, kind: /** @type {const} */ ('keyword'), detail: 'keyword' }));
+        case 'update-body': {
+            if (!clause.hasSet) {
+                // Before SET: offer SET and WHERE keywords.
+                return ['SET', 'WHERE'].map((label) => ({ label, kind: /** @type {const} */ ('keyword'), detail: 'keyword' }));
+            }
+            // After SET: offer field completions for the LHS of assignments, plus WHERE.
+            const sources = GET_MODEL_SOURCES(defs, clause.sources, prefix);
+            /** @type {CompletionEntry[]} */
+            const items = [];
+            for (const { fqn, artifact } of sources) {
+                for (const [name, element] of Object.entries(artifact.elements ?? {})) {
+                    const el = element;
+                    const doc = csnText(el.doc) ?? el['@description']?.val ?? el['@title']?.val ?? undefined;
+                    items.push({ label: name, kind: 'field', detail: resolveBaseType(el.type, defs) ?? '', entity: fqn, doc });
+                    // Synthesized FK columns: `<assoc>_<keyRef>` — emit one entry per key ref.
+                    const keys = /** @type {Array<{ ref?: string[] }> | undefined} */ (/** @type {any} */ (el).keys);
+                    if (keys && el.target) {
+                        const targetArtifact = defs[el.target];
+                        for (const k of keys) {
+                            const ref = k.ref;
+                            if (!ref?.length) continue;
+                            const fkName = `${name}_${ref.join('_')}`;
+                            const keyEl = targetArtifact?.elements?.[/** @type {string} */ (ref[0])];
+                            const fkType = keyEl ? (resolveBaseType(/** @type {any} */ (keyEl).type, defs) ?? '') : '';
+                            items.push({ label: fkName, kind: 'field', detail: fkType, entity: fqn });
+                        }
+                    }
+                }
+            }
+            items.push({ label: 'WHERE', kind: 'keyword', detail: 'keyword' });
+            return items;
+        }
 
         case 'unknown': {
             // At the very start of a query — nothing meaningful typed before the

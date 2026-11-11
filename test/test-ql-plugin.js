@@ -3695,9 +3695,39 @@ describe('CqlHover — non-awaited result variable hover', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// PersistentWorkerPool — main-thread coverage (Atomics.wait is fine here)
-// ---------------------------------------------------------------------------
+describe('CqlHover — write statement result variable hover', () => {
+    it('hover on awaited DELETE variable shows number', () => {
+        const src = 'const z = await cds.ql`DELETE FROM Books WHERE ID = 1                  `;\nconsole.log(z);\nexport {};';
+        const pos = src.indexOf('console.log(z)') + 'console.log('.length;
+        const { proxy } = createProxy('test.ts', src, BOOKS_WORKER);
+        const info = proxy.getQuickInfoAtPosition('test.ts', pos);
+        assert.ok(info, 'expected hover info on DELETE variable');
+        const text = (info.displayParts ?? []).map((p) => p.text).join('');
+        assert.ok(text.includes('number'), 'DELETE hover must show number, got: ' + text);
+        assert.ok(!text.includes('unknown'), 'DELETE hover must not show unknown');
+    });
+
+    it('hover on awaited UPDATE variable shows number', () => {
+        const src = 'const t = await cds.ql`UPDATE Books SET title = "x"                    `;\nconsole.log(t);\nexport {};';
+        const pos = src.indexOf('console.log(t)') + 'console.log('.length;
+        const { proxy } = createProxy('test.ts', src, BOOKS_WORKER);
+        const info = proxy.getQuickInfoAtPosition('test.ts', pos);
+        assert.ok(info, 'expected hover info on UPDATE variable');
+        const text = (info.displayParts ?? []).map((p) => p.text).join('');
+        assert.ok(text.includes('number'), 'UPDATE hover must show number, got: ' + text);
+        assert.ok(!text.includes('unknown'), 'UPDATE hover must not show unknown');
+    });
+
+    it('hover on non-awaited DELETE variable shows Promise<number>', () => {
+        const src = 'const z = cds.ql`DELETE FROM Books WHERE ID = 1                        `;\nconsole.log(z);\nexport {};';
+        const pos = src.indexOf('console.log(z)') + 'console.log('.length;
+        const { proxy } = createProxy('test.ts', src, BOOKS_WORKER);
+        const info = proxy.getQuickInfoAtPosition('test.ts', pos);
+        assert.ok(info, 'expected hover info on non-awaited DELETE variable');
+        const text = (info.displayParts ?? []).map((p) => p.text).join('');
+        assert.ok(text.includes('Promise') && text.includes('number'), 'non-awaited DELETE hover must show Promise<number>, got: ' + text);
+    });
+});
 
 describe('PersistentWorkerPool — end-to-end', () => {
     // Atomics.wait is permitted on the main thread in node:test (only worker

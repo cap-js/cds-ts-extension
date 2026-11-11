@@ -76,7 +76,7 @@ function getTokenContext(query, cursorOffset, defs, prefix) {
  *   | { kind: 'delete-target' }
  *   | { kind: 'delete-body' }
  *   | { kind: 'update-target' }
- *   | { kind: 'update-body', hasSet: boolean }
+ *   | { kind: 'update-body', hasSet: boolean, sources: CqlSource[] }
  *   | { kind: 'insert-target' }
  *   | { kind: 'insert-body' }
  *   | { kind: 'unknown' }
@@ -180,7 +180,19 @@ function getCursorClause(tokens, cursorOffset) {
                 expandStack.pop();
                 braceDepth--;
                 if (braceDepth === 0) {
-                    clause = { kind: 'unknown' };
+                    // Closed the outermost brace. In postfix SELECT, return to
+                    // post-FROM context (WHERE / ORDER BY / JOIN / … can follow).
+                    // In write-statement object forms (UPDATE SET { } / INSERT ENTRIES { })
+                    // return to the corresponding body state, not from-source.
+                    if (postfixMode) {
+                        clause = { kind: 'from-source' };
+                    } else if (writeKind === 'update') {
+                        clause = { kind: 'update-body', hasSet: true, sources: clause.kind === 'update-body' ? clause.sources : [] };
+                    } else if (writeKind === 'insert') {
+                        clause = { kind: 'insert-body' };
+                    } else {
+                        clause = { kind: 'unknown' };
+                    }
                 } else {
                     clause = {
                         kind: 'select-item',
@@ -238,7 +250,7 @@ function getCursorClause(tokens, cursorOffset) {
                 expectAlias = false;
             } else if (kw === 'SET') {
                 // UPDATE <entity> SET <assignments> — stays in update-body, hasSet true.
-                if (writeKind === 'update') clause = { kind: 'update-body', hasSet: true };
+                if (writeKind === 'update') clause = { kind: 'update-body', hasSet: true, sources: clause.kind === 'update-body' ? clause.sources : [] };
                 expectAlias = false;
             } else if (kw === 'FROM') {
                 if (clause.kind === 'select-item' && clause.expandPath !== undefined && clause.expandPath.length === 0 && fromSources.length === 0 && pendingEntity === null) {
@@ -282,7 +294,8 @@ function getCursorClause(tokens, cursorOffset) {
             } else if (clause.kind === 'update-target') {
                 // UPDATE <entity> — entity named; body expects SET/WHERE next.
                 writeEntitySeen = true;
-                clause = { kind: 'update-body', hasSet: false };
+                pendingEntity = tok.value;
+                clause = { kind: 'update-body', hasSet: false, sources: [{ entity: tok.value, ref: tok.value }] };
             } else if (clause.kind === 'from-source') {
                 if (pendingEntity === null) {
                     pendingEntity = tok.value;

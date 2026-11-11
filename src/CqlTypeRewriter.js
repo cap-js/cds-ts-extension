@@ -591,8 +591,10 @@ function rewriteSnapshot(fileName, sourceText, ts, originalSource, rewriteCache,
         let typeExpr;
         if (cachedTypeExpr !== undefined) {
             typeExpr = cachedTypeExpr;
-        } else if (cacheOnly) {
+        } else if (cacheOnly && !WRITE_STATEMENT_RE.test(queryText)) {
             // Cache-only mode and this query isn't resolved yet — defer to async path.
+            // Write statements (UPDATE/DELETE/INSERT/UPSERT) are exempt: they resolve
+            // synchronously from typeof cds with no worker, so always place them now.
             workerMiss = true;
             continue;
         } else {
@@ -648,4 +650,6 @@ module.exports = {
     fieldTokenAtOffset,
     resolveRowTypeBody,
     rewriteSnapshot,
+    writeStatementValueType,
+    WRITE_STATEMENT_RE,
 };
