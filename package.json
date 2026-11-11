@@ -36,9 +36,9 @@
         "@biomejs/biome": "^2",
         "@cap-js/sqlite": "^3.1.2",
         "@sap/cds": "10.x",
-        "@sap/cds-compiler": "7.1.1",
+        "@sap/cds-compiler": "^7",
         "@types/node": "^26.6.6",
         "typescript": "6.x",
-        "zod": "^3.25.76"
+        "zod": "^4.6.7"
     }
 }
