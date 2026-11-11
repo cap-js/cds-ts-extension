@@ -1,12 +1,8 @@
 'use strict';
 /**
- * CDS build plugin — validates cds.ql tagged-template queries at build/serve time.
- *
- * In build mode (`cds build`): registers a `cql-validator` build task that scans
- * all .js/.ts source files and logs a warning for each invalid query.
- *
- * In watch mode (`cds serve --watch`): runs the same scan once after the model is
- * served, so invalid queries surface in the terminal without blocking startup.
+ * CDS build plugin — validates cds.ql tagged-template queries at build time.
+ * Registers a `cql-validator` build task that scans all .js/.ts source files
+ * and logs a warning for each invalid query.
  */
 
 const cds = require('@sap/cds');
@@ -109,10 +105,7 @@ function runScan(root, defs) {
     if (count === 0) log.info('cql-validator: no issues found');
 }
 
-// ---------------------------------------------------------------------------
-// Build-mode registration (requires @sap/cds-dk >= 7.5.0)
-// ---------------------------------------------------------------------------
-if (cds.build?.register) {
+if (cds.build) {
     class CqlValidatorTask extends cds.build.Plugin {
         static get hasTask() {
             return true;
@@ -124,16 +117,6 @@ if (cds.build?.register) {
         }
     }
     cds.build.register('cql-validator', CqlValidatorTask);
-}
-
-// ---------------------------------------------------------------------------
-// Watch-mode: one-shot scan after the model is ready
-// ---------------------------------------------------------------------------
-if (cds.watched) {
-    cds.once('served', () => {
-        const defs = cds.model?.definitions ?? {};
-        runScan(cds.root, defs);
-    });
 }
 
 module.exports = { scanFile, collectSourceFiles };
