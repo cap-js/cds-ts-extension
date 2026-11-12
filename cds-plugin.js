@@ -14,10 +14,20 @@ const { validateCqlQuery } = require('./src/CqlLogic');
 const { collectCqlTemplates, extractTemplateText } = require('./src/CqlTypeRewriter');
 const { serviceAnnotationFor } = require('./src/ServiceAnnotation');
 
-// Lazy-required so projects without a TypeScript installation can still load
-// this file (e.g. pure-JS CAP projects that never invoke the scanner).
+// Lazy-required: most CAP projects have TypeScript available (either directly
+// or transitively via cds-dk), but we do not declare it as a hard dependency
+// to avoid duplicates. If it is absent we skip scanning and log once.
 let _ts;
-const getTs = () => (_ts ??= require('typescript'));
+function getTs() {
+    if (_ts === undefined) {
+        try {
+            _ts = require('typescript');
+        } catch {
+            _ts = null;
+        }
+    }
+    return _ts;
+}
 
 const log = cds.log('cql-validator');
 
@@ -94,6 +104,10 @@ function scanFile(filePath, src, defs) {
  * @param {import('./src/csn').CsnDefs} defs
  */
 function runScan(root, defs) {
+    if (!getTs()) {
+        log.info('cql-validator: skipping — typescript is not installed');
+        return;
+    }
     let count = 0;
     for (const filePath of collectSourceFiles(root)) {
         let src;
