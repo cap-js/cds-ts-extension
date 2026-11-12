@@ -8,12 +8,16 @@
 // Resolve @sap/cds from the project root so we share the singleton that
 // cds-dk already augmented with .build — not the copy in our own node_modules.
 const cds = require(require.resolve('@sap/cds', { paths: [process.cwd(), __dirname] }));
-const ts = require('typescript');
 const { readdirSync, readFileSync, statSync } = require('node:fs');
 const { join, extname } = require('node:path');
 const { validateCqlQuery } = require('./src/CqlLogic');
 const { collectCqlTemplates, extractTemplateText } = require('./src/CqlTypeRewriter');
 const { serviceAnnotationFor } = require('./src/ServiceAnnotation');
+
+// Lazy-required so projects without a TypeScript installation can still load
+// this file (e.g. pure-JS CAP projects that never invoke the scanner).
+let _ts;
+const getTs = () => (_ts ??= require('typescript'));
 
 const log = cds.log('cql-validator');
 
@@ -62,6 +66,7 @@ function collectSourceFiles(dir, acc = []) {
  * @returns {Array<{ file: string, line: number, col: number, message: string }>}
  */
 function scanFile(filePath, src, defs) {
+    const ts = getTs();
     const sf = ts.createSourceFile(filePath, src, ts.ScriptTarget.Latest, true);
     const assignments = collectCqlTemplates(ts, sf);
     if (assignments.length === 0) return [];
