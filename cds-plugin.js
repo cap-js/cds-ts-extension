@@ -13,6 +13,7 @@ const { readdirSync, readFileSync, statSync } = require('node:fs');
 const { join, extname } = require('node:path');
 const { validateCqlQuery } = require('./src/CqlLogic');
 const { collectCqlAssignments, extractTemplateText } = require('./src/CqlTypeRewriter');
+const { serviceAnnotationFor } = require('./src/ServiceAnnotation');
 
 const log = cds.log('cql-validator');
 
@@ -65,13 +66,10 @@ function scanFile(filePath, src, defs) {
     const assignments = collectCqlAssignments(ts, sf);
     if (assignments.length === 0) return [];
 
-    // Infer service prefix from an optional `// @cds-service <Name>` comment anywhere
-    // in the file — the same convention used by the IDE plugin's ServiceAnnotation.
-    const prefix = src.match(/@cds-service\s+(\S+)/)?.[1];
-
     const results = [];
     for (const { template } of assignments) {
         const query = extractTemplateText(ts, template);
+        const prefix = serviceAnnotationFor(ts, src, template, sf);
         const diags = validateCqlQuery(query, defs, prefix);
         for (const d of diags) {
             // d.start is a byte offset into the query string (which starts after the
@@ -114,7 +112,21 @@ if (cds.build) {
         }
 
         async build() {
-            const defs = cds.model?.definitions ?? {};
+            let csn;
+            try {
+                csn = await this.model();
+            } catch {
+                // fall through to direct load
+            }
+            if (!csn) {
+                try {
+                    csn = await cds.load('*', { root: cds.root });
+                } catch (err) {
+                    log.warn(`cql-validator: could not load CDS model: ${err.message}`);
+                    return;
+                }
+            }
+            const defs = csn.definitions ?? {};
             runScan(cds.root, defs);
         }
     }
