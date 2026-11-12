@@ -28,7 +28,6 @@ function getTs() {
     }
     return _ts;
 }
-
 const log = cds.log('cql-validator');
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'gen', '.git', '@cds-models']);
