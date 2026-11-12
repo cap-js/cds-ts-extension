@@ -168,7 +168,7 @@ function collectCqlTemplates(ts, sourceFile) {
     /** @type {CqlTemplateRef[]} */
     const results = [];
     function visit(/** @type {import('typescript').Node} */ node) {
-        if (isCdsQlInit(ts, node)) {
+        if (isCdsQlInit(ts, /** @type {import('typescript').Expression} */ (node))) {
             const awaited = ts.isAwaitExpression(node.parent);
             results.push({ template: /** @type {import('typescript').TaggedTemplateExpression} */ (node), awaited });
         }
