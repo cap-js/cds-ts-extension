@@ -12,7 +12,7 @@ const ts = require('typescript');
 const { readdirSync, readFileSync, statSync } = require('node:fs');
 const { join, extname } = require('node:path');
 const { validateCqlQuery } = require('./src/CqlLogic');
-const { collectCqlAssignments, extractTemplateText } = require('./src/CqlTypeRewriter');
+const { collectCqlTemplates, extractTemplateText } = require('./src/CqlTypeRewriter');
 const { serviceAnnotationFor } = require('./src/ServiceAnnotation');
 
 const log = cds.log('cql-validator');
@@ -63,7 +63,7 @@ function collectSourceFiles(dir, acc = []) {
  */
 function scanFile(filePath, src, defs) {
     const sf = ts.createSourceFile(filePath, src, ts.ScriptTarget.Latest, true);
-    const assignments = collectCqlAssignments(ts, sf);
+    const assignments = collectCqlTemplates(ts, sf);
     if (assignments.length === 0) return [];
 
     const results = [];

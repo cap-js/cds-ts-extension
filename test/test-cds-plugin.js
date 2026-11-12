@@ -71,6 +71,28 @@ const b = await cds.ql\`SELECT ID FROM Ghost\`;
         assert.equal(diags.length, 2);
     });
 
+    it('validates a bare expression statement (no assignment)', () => {
+        const src = `
+// @cds-service Svc
+await cds.ql\`SELECT ghost FROM Books\`;
+`;
+        const diags = scanFile('test.js', src, DEFS);
+        assert.equal(diags.length, 1);
+        assert.ok(diags[0].message.includes('ghost'), `expected 'ghost' in message: ${diags[0].message}`);
+    });
+
+    it('uses the per-statement @cds-service annotation for bare expression statements', () => {
+        const src = `
+// @cds-service Svc
+const x = await cds.ql\`SELECT ID FROM Books\`;
+// @cds-service Svc
+await cds.ql\`SELECT ghost FROM Books\`;
+`;
+        const diags = scanFile('test.js', src, DEFS);
+        assert.equal(diags.length, 1);
+        assert.ok(diags[0].message.includes('ghost'));
+    });
+
     it('returns no diagnostics when there are no cds.ql templates', () => {
         const src = 'const x = 1 + 2;';
         assert.deepEqual(scanFile('test.js', src, DEFS), []);
