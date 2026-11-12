@@ -1,7 +1,10 @@
 {
     "name": "@cap-js/cds-ts-extension",
-    "version": "0.0.1",
+    "version": "0.1.0",
     "description": "TypeScript Language Service Plugin providing CQL-aware completions, hover, diagnostics, and type inference inside cds.ql`...` tagged template literals.",
+    "repository": {
+        "url": "https://github.com/cap-js/cds-ts-extension"
+    },
     "keywords": [
         "CAP",
         "CDS",
@@ -39,9 +42,9 @@
         "@biomejs/biome": "^2",
         "@cap-js/sqlite": "^3.1.2",
         "@sap/cds": "10.x",
-        "@sap/cds-compiler": "7.1.1",
+        "@sap/cds-compiler": "^7",
         "@types/node": "^26.6.6",
         "typescript": "6.x",
-        "zod": "^3.25.76"
+        "zod": "^4.6.7"
     }
 }

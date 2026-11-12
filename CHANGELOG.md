@@ -9,6 +9,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- A build plugin that points out faulty `cds.ql` queries as warnings as part of `cds build`.
+### Changed
+- The build plugin (`cds-plugin.js`) and IDE diagnostics now validate bare `cds.ql` expression statements that are not assigned to a variable (e.g. `await cds.ql\`DELETE FROM Messages WHERE ...\``). Previously only `const x = cds.ql\`...\`` declarations were collected; standalone side-effect queries were silently skipped. The `// @cds-service` annotation is now also read correctly for bare expression statements — previously the lookup walked up to the source-file root and lost the annotation entirely.
+### Deprecated
+### Removed
+### Fixed
+### Security
+
+## [0.1.0] - 2026-11-11
+
+### Added
 - Initial standalone extraction of the CDS TypeScript Language Service Plugin from the `@sap/cds-lsp` repository. Provides CQL-aware completions, hover, diagnostics, and type inference inside `` cds.ql`...` `` tagged template literals in `.js`/`.ts` files. See [`src/README.md`](./src/README.md) for the full feature and design documentation.
 - `DEVELOPMENT.md` documenting the live Extension-Host development loop (watch build wired into the VS Code extension via `dist` symlinks, feature flags, TS Server restart).
 - `build:watch` script and a VS Code `watch` task for incremental esbuild rebuilds.
@@ -37,7 +48,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Inline-dot expands (`` cds.ql`SELECT from Books { author.{ name } }` ``) now resolve correctly for completions and diagnostics at any nesting depth. Previously the association head (`author.`) retained its trailing dot, so completions inside the block returned nothing and the head itself was mis-flagged as an `Unknown field`.
 - Synthesized managed-association foreign-key columns (e.g. `author_ID` for an association `author`) are now accepted as valid fields in `SELECT` column and `WHERE` validation. Previously only the write-statement path recognised them, so a `` cds.ql`SELECT author_ID FROM Books` `` was mis-flagged `Unknown field`. Field validation and ambiguity detection now build their element sets from `elementNamesWithForeignKeys`, matching the write path.
 - Association-path references in `SELECT` columns (e.g. `` cds.ql`SELECT author.name, author.address.city FROM Books` ``) are now resolved by following the association to its target entity. Previously any dotted reference was treated strictly as `sourceAlias.field`, so an association path whose first segment is not a `FROM`/`JOIN` alias was mis-flagged as `Unknown source`. Source-alias qualification still works (including the combined `alias.assoc.field`), foreign-key columns are accepted at every hop, and genuine errors are still reported precisely — an unnavigable first segment as `Unknown source`, an unknown terminal field as `Unknown field`.
-- The build plugin (`cds-plugin.js`) and IDE diagnostics now validate bare `cds.ql` expression statements that are not assigned to a variable (e.g. `await cds.ql\`DELETE FROM Messages WHERE ...\``). Previously only `const x = cds.ql\`...\`` declarations were collected; standalone side-effect queries were silently skipped. The `// @cds-service` annotation is now also read correctly for bare expression statements — previously the lookup walked up to the source-file root and lost the annotation entirely.
 - Field completions after `SET` in `UPDATE` statements (e.g. `` cds.ql`UPDATE Books SET |` ``): the cursor-analysis state machine now tracks the update target entity through the `SET` keyword, so completions after `SET` offer the entity's fields alongside the `WHERE` keyword. Previously only `WHERE` was offered.
 - Hover type for `UPDATE`/`DELETE` result variables now correctly shows `number` (affected-row count) instead of `unknown`. `getCqlHover`'s result-variable path was calling `buildHoverRowBody`, which parses SELECT columns and returns `unknown` when it finds none — as is always the case for write statements. The hover path now short-circuits on write statements the same way `resolveTypeExpr` does, and returns the correct type without a model probe.
 - `UPDATE`/`DELETE` result-variable types now show correctly on every keystroke (not only after the initial file open). In `rewriteSnapshot`'s `cacheOnly` debounce fast-path, write-statement assignments were incorrectly skipped along with SELECT queries whose worker result was not yet cached, so their type reverted to `unknown` on any edit. Write statements are exempt from the `cacheOnly` skip because they resolve without a worker call.
