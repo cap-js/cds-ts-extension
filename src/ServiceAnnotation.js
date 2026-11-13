@@ -21,6 +21,7 @@ function serviceAnnotationFor(typescript, sourceText, node, sf) {
     let stmt = node;
     while (stmt.parent && stmt.parent !== sf) {
         if (typescript.isVariableStatement(stmt)) break;
+        if (typescript.isExpressionStatement(stmt)) break;
         stmt = stmt.parent;
     }
     const stmtStart = stmt.getStart(sf);

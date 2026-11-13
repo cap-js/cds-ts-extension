@@ -2,7 +2,7 @@
 
 /** @typedef {import('typescript/lib/tsserverlibrary')} TS */
 
-const { collectCqlAssignments, extractTemplateText } = require('./CqlTypeRewriter');
+const { collectCqlTemplates, extractTemplateText } = require('./CqlTypeRewriter');
 const { serviceAnnotationFor } = require('./ServiceAnnotation');
 /** @typedef {import('./QueryContext').QueryContext} QueryContext */
 
@@ -18,7 +18,7 @@ const { serviceAnnotationFor } = require('./ServiceAnnotation');
 function getCqlDiagnostics(ctx, typescript) {
     const { origText, origSf, projectRoot, runWorker, logger } = ctx;
 
-    const assignments = collectCqlAssignments(typescript, origSf);
+    const assignments = collectCqlTemplates(typescript, origSf);
     if (!assignments.length) return [];
 
     const diagnostics = [];

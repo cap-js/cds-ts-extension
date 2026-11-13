@@ -154,6 +154,30 @@ function collectCqlAssignments(ts, sourceFile) {
     return results;
 }
 
+/**
+ * Collect every `cds.ql\`...\`` tagged template in a source file,
+ * regardless of whether it is assigned to a variable. Use this for
+ * validation passes (e.g. the build plugin) where side-effect queries
+ * such as bare `await cds.ql\`UPDATE ...\`` must also be checked.
+ *
+ * @param {TS} ts
+ * @param {import('typescript').SourceFile} sourceFile
+ * @returns {CqlTemplateRef[]}
+ */
+function collectCqlTemplates(ts, sourceFile) {
+    /** @type {CqlTemplateRef[]} */
+    const results = [];
+    function visit(/** @type {import('typescript').Node} */ node) {
+        if (isCdsQlInit(ts, /** @type {import('typescript').Expression} */ (node))) {
+            const awaited = ts.isAwaitExpression(node.parent);
+            results.push({ template: /** @type {import('typescript').TaggedTemplateExpression} */ (node), awaited });
+        }
+        ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+    return results;
+}
+
 // ---------------------------------------------------------------------------
 // Type string helpers
 // ---------------------------------------------------------------------------
@@ -644,6 +668,7 @@ module.exports = {
     findCdsQueryTemplate,
     resolveToCdsQuery,
     collectCqlAssignments,
+    collectCqlTemplates,
     buildTypeString,
     buildTypeBody,
     resolveTypeExpr,

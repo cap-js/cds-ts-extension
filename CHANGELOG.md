@@ -9,7 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- A build plugin that points out faulty `cds.ql` queries as warnings as part of `cds build`.
 ### Changed
+- The build plugin (`cds-plugin.js`) and IDE diagnostics now validate bare `cds.ql` expression statements that are not assigned to a variable (e.g. `await cds.ql\`DELETE FROM Messages WHERE ...\``). Previously only `const x = cds.ql\`...\`` declarations were collected; standalone side-effect queries were silently skipped. The `// @cds-service` annotation is now also read correctly for bare expression statements — previously the lookup walked up to the source-file root and lost the annotation entirely.
 ### Deprecated
 ### Removed
 ### Fixed

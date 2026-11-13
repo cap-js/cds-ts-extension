@@ -272,6 +272,74 @@ function getSuggestions(query, cursorOffset, defs, prefix) {
 }
 
 /**
+ * Resolve an entity token against `defs`, push an UnknownEntity diagnostic on
+ * failure, and return the element set on success (or null on failure).
+ * @param {CsnDefs} defs
+ * @param {CqlToken} entityToken
+ * @param {string | undefined} prefix
+ * @param {CqlDiagnostic[]} errors
+ * @returns {Set<string> | null}
+ */
+function resolveEntityOrError(defs, entityToken, prefix, errors) {
+    const resolved = resolveSource(defs, entityToken.value, prefix);
+    if (!resolved) {
+        errors.push({
+            message: `Unknown entity or view '${entityToken.value}'`,
+            start: entityToken.start,
+            end: entityToken.end,
+            code: CqlDiagnosticCode.UnknownEntity,
+        });
+        return null;
+    }
+    return elementNamesWithForeignKeys(resolved.artifact);
+}
+
+/**
+ * Validate a dotted token (e.g. `b.title`, `Status.code`) in a SELECT/WHERE/ORDER BY
+ * context against the resolved sources. Tries source-qualified interpretation first,
+ * then association-path from any source. Pushes at most one diagnostic.
+ * @param {CqlToken} tok
+ * @param {Array<{ ref: string, fqn: string, artifact: import('../csn').CsnArtifact }>} resolvedSources
+ * @param {Map<string, Set<string>>} sourceElements
+ * @param {CsnDefs} defs
+ * @param {CqlDiagnostic[]} errors
+ */
+function validateDottedRef(tok, resolvedSources, sourceElements, defs, errors) {
+    const segments = tok.value.split('.');
+    const first = /** @type {string} */ (segments[0]);
+    const segOffset = (/** @type {number} */ i) => tok.start + segments.slice(0, i).reduce((/** @type {number} */ n, /** @type {string} */ s) => n + s.length + 1, 0);
+
+    const src = resolvedSources.find((s) => s.ref === first);
+    if (src) {
+        // Source-qualified: validate the remaining segments as an assoc-path.
+        const rest = segments.slice(1);
+        const names = sourceElements.get(first);
+        const simpleHit = rest.length === 1 && (names?.has(/** @type {string} */ (rest[0])) || elementNamesWithForeignKeys(src.artifact).has(/** @type {string} */ (rest[0])));
+        const fail = simpleHit ? null : resolveAssocPath(defs, src.artifact, rest);
+        if (fail) {
+            errors.push({
+                message: `Unknown field '${rest[fail.seg]}' on '${src.fqn}'`,
+                start: segOffset(fail.seg + 1),
+                end: tok.end,
+                code: CqlDiagnosticCode.UnknownField,
+            });
+        }
+        return;
+    }
+
+    // Association path from any source (first segment is not a FROM/JOIN alias).
+    const resolvedAny = resolvedSources.some((s) => resolveAssocPath(defs, s.artifact, segments) === null);
+    if (!resolvedAny) {
+        const firstIsKnown = resolvedSources.some((s) => elementNamesWithForeignKeys(s.artifact).has(first) || Boolean(/** @type {any} */ (s.artifact.elements?.[first])?.target));
+        if (firstIsKnown) {
+            errors.push({ message: `Unknown field '${tok.value}'`, start: tok.start, end: tok.end, code: CqlDiagnosticCode.UnknownField });
+        } else {
+            errors.push({ message: `Unknown source '${first}'`, start: tok.start, end: segOffset(1) - 1, code: CqlDiagnosticCode.UnknownSource });
+        }
+    }
+}
+
+/**
  * @param {string} query
  * @param {CsnDefs} defs
  * @param {string} [prefix]
@@ -497,62 +565,7 @@ function validateCqlQuery(query, defs, prefix) {
             }
 
             if (tok.value.includes('.')) {
-                // Dotted reference. Two valid interpretations:
-                //   (A) source-qualified:   <sourceRef>.<field…>   (e.g. `b.title`, `b.author.name`)
-                //   (B) association path:    <assoc>.<…>.<field>    (e.g. `Status.code`, `up_.Travel.ID`)
-                // Try (A) first (the first segment names a FROM/JOIN source), then
-                // (B) against each resolved source. Only error if neither resolves.
-                const segments = tok.value.split('.');
-                const first = /** @type {string} */ (segments[0]);
-                // byte offset of each segment start within the token
-                const segOffset = (/** @type {number} */ idxSeg) => tok.start + segments.slice(0, idxSeg).reduce((/** @type {number} */ n, /** @type {string} */ s) => n + s.length + 1, 0);
-
-                const src = resolvedSources.find((s) => s.ref === first);
-                if (src) {
-                    // (A) source-qualified: validate the remaining segments as an
-                    // assoc-path from that source's entity. A lone field is the
-                    // 1-hop case. `followAssocPath`-style resolution handles deeper
-                    // paths like `b.author.name`.
-                    const rest = segments.slice(1);
-                    const names = sourceElements.get(first);
-                    const simpleHit = rest.length === 1 && (names?.has(/** @type {string} */ (rest[0])) || elementNamesWithForeignKeys(src.artifact).has(/** @type {string} */ (rest[0])));
-                    const fail = simpleHit ? null : resolveAssocPath(defs, src.artifact, rest);
-                    if (fail) {
-                        errors.push({
-                            message: `Unknown field '${rest[fail.seg]}' on '${src.fqn}'`,
-                            start: segOffset(fail.seg + 1),
-                            end: tok.end,
-                            code: CqlDiagnosticCode.UnknownField,
-                        });
-                    }
-                } else {
-                    // (B) association path from a source entity (no source alias
-                    // matched the first segment). Valid if ANY resolved source can
-                    // navigate the full path.
-                    const resolvedAny = resolvedSources.some((s) => resolveAssocPath(defs, s.artifact, segments) === null);
-                    if (!resolvedAny) {
-                        // Report against the first source for a concrete message.
-                        // If the first segment isn't even an association/element of
-                        // any source, it reads as an unknown source; otherwise a
-                        // later segment is the unknown field.
-                        const firstIsKnown = resolvedSources.some((s) => elementNamesWithForeignKeys(s.artifact).has(first) || Boolean(/** @type {any} */ (s.artifact.elements?.[first])?.target));
-                        if (firstIsKnown) {
-                            errors.push({
-                                message: `Unknown field '${tok.value}'`,
-                                start: tok.start,
-                                end: tok.end,
-                                code: CqlDiagnosticCode.UnknownField,
-                            });
-                        } else {
-                            errors.push({
-                                message: `Unknown source '${first}'`,
-                                start: tok.start,
-                                end: segOffset(1) - 1,
-                                code: CqlDiagnosticCode.UnknownSource,
-                            });
-                        }
-                    }
-                }
+                validateDottedRef(tok, resolvedSources, sourceElements, defs, errors);
             } else {
                 // Unqualified reference
                 const count = elementCount.get(tok.value) ?? 0;
@@ -611,17 +624,8 @@ function validateWriteStatement(significant, defs, prefix) {
     const entityToken = entityIdx >= 0 ? significant[entityIdx] : undefined;
     if (!entityToken || entityToken.kind !== 'identifier') return errors; // partial input
 
-    const resolved = resolveSource(defs, entityToken.value, prefix);
-    if (!resolved) {
-        errors.push({
-            message: `Unknown entity or view '${entityToken.value}'`,
-            start: entityToken.start,
-            end: entityToken.end,
-            code: CqlDiagnosticCode.UnknownEntity,
-        });
-        return errors;
-    }
-    const elements = elementNamesWithForeignKeys(resolved.artifact);
+    const elements = resolveEntityOrError(defs, entityToken, prefix, errors);
+    if (!elements) return errors;
 
     /** Push an UnknownField diagnostic for `tok` unless its field exists. */
     const checkField = (/** @type {CqlToken} */ tok) => {
