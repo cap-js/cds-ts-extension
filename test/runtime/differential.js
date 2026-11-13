@@ -62,7 +62,7 @@ function deriveTruth(flavors) {
  * @typedef {object} BatteryCase
  * @property {string} query       full CQL query text (FQN form, no service prefix)
  * @property {boolean} valid      whether the model says this query is valid
- * @property {'own' | 'fk' | 'assoc-path' | 'invalid'} category  case category (for per-category anti-rot floors)
+ * @property {'own' | 'fk' | 'assoc-path' | 'invalid' | 'write-valid' | 'write-invalid'} category  case category (for per-category anti-rot floors)
  * @property {string} why         short label for diagnostics
  */
 
@@ -117,4 +117,43 @@ function ghostName(own, fks) {
     return n;
 }
 
-module.exports = { deriveTruth, buildBattery };
+/**
+ * Generate a write-statement battery from the truth model. For each entity:
+ *   - UPDATE SET with a valid own scalar column       → valid
+ *   - UPDATE SET with a valid synthesized FK column   → valid
+ *   - UPDATE SET with a ghost column                  → invalid
+ *   - DELETE FROM WHERE with a valid own scalar       → valid
+ *   - DELETE FROM WHERE with a ghost column           → invalid
+ *   - INSERT INTO with a valid own scalar column list → valid
+ *   - INSERT INTO with a ghost column list            → invalid
+ *
+ * Covers `validateWriteStatement` with model-derived cases so regressions
+ * there surface the same way as SELECT regressions in `buildBattery`.
+ * @param {Map<string, TruthEntity>} truth
+ * @returns {BatteryCase[]}
+ */
+function buildWriteBattery(truth) {
+    /** @type {BatteryCase[]} */
+    const cases = [];
+    for (const { fqn, own, fks, assocs } of truth.values()) {
+        const ghost = ghostName(own, fks);
+        // Pick one scalar own column (not an association) as the representative field.
+        const scalar = [...own].find((n) => !assocs.has(n));
+        if (scalar) {
+            cases.push({ query: `UPDATE ${fqn} SET ${scalar} = 1`, valid: true, category: 'write-valid', why: `UPDATE ${fqn} SET ${scalar} (own scalar)` });
+            cases.push({ query: `DELETE FROM ${fqn} WHERE ${scalar} = 1`, valid: true, category: 'write-valid', why: `DELETE ${fqn} WHERE ${scalar} (own scalar)` });
+            cases.push({ query: `INSERT INTO ${fqn} (${scalar}) VALUES (1)`, valid: true, category: 'write-valid', why: `INSERT INTO ${fqn} (${scalar}) (own scalar)` });
+        }
+        // FK columns are valid SET targets in UPDATE.
+        for (const fk of fks) {
+            cases.push({ query: `UPDATE ${fqn} SET ${fk} = 1`, valid: true, category: 'write-valid', why: `UPDATE ${fqn} SET ${fk} (fk)` });
+        }
+        // Ghost column must be flagged in every write form.
+        cases.push({ query: `UPDATE ${fqn} SET ${ghost} = 1`, valid: false, category: 'write-invalid', why: `UPDATE ${fqn} SET ${ghost} (ghost → must be flagged)` });
+        cases.push({ query: `DELETE FROM ${fqn} WHERE ${ghost} = 1`, valid: false, category: 'write-invalid', why: `DELETE ${fqn} WHERE ${ghost} (ghost → must be flagged)` });
+        cases.push({ query: `INSERT INTO ${fqn} (${ghost}) VALUES (1)`, valid: false, category: 'write-invalid', why: `INSERT INTO ${fqn} (${ghost}) (ghost → must be flagged)` });
+    }
+    return cases;
+}
+
+module.exports = { deriveTruth, buildBattery, buildWriteBattery };

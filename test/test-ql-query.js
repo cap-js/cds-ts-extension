@@ -3120,6 +3120,30 @@ describe('serviceAnnotationFor', () => {
         const src = 'function f() {\n  // @cds-service Inner\n  const r = cds.ql`SELECT id FROM Books`\n}';
         assert.equal(annotationFor(src), 'Inner');
     });
+
+    it('reads annotation for a bare ExpressionStatement (no assignment)', () => {
+        const src = '// @cds-service BareService\nawait cds.ql`DELETE FROM Books`';
+        assert.equal(annotationFor(src), 'BareService');
+    });
+
+    it('returns undefined for a bare ExpressionStatement with no annotation', () => {
+        const src = 'await cds.ql`DELETE FROM Books`';
+        assert.equal(annotationFor(src), undefined);
+    });
+
+    it('uses per-statement annotation for mixed assigned and bare expressions', () => {
+        const src = ['// @cds-service Svc1', 'const x = cds.ql`SELECT id FROM Books`', '// @cds-service Svc2', 'await cds.ql`DELETE FROM Authors`'].join('\n');
+        const sf = TS.createSourceFile('t.ts', src, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
+        const templates = [];
+        function visit(n) {
+            if (TS.isTaggedTemplateExpression(n)) templates.push(n);
+            TS.forEachChild(n, visit);
+        }
+        visit(sf);
+        assert.equal(templates.length, 2);
+        assert.equal(serviceAnnotationFor(TS, src, templates[0], sf), 'Svc1');
+        assert.equal(serviceAnnotationFor(TS, src, templates[1], sf), 'Svc2');
+    });
 });
 
 // ---------------------------------------------------------------------------
