@@ -443,6 +443,35 @@ function writeStatementValueType(kind) {
 const WRITE_STATEMENT_RE = /^\s*(UPDATE|INSERT|UPSERT|DELETE)\b/i;
 
 /**
+ * Whether a SELECT query uses the `one` singularizer, so its result is a single
+ * row rather than an array (CAP's in-template equivalent of `SELECT.one`).
+ *
+ * `one` is the singularizer ONLY when it sits immediately after `SELECT` and is
+ * followed by a column list — verified against the real `@sap/cds` compiler:
+ *   - `SELECT one ID FROM X`          → one=true  (single row)
+ *   - `SELECT one * FROM X`           → one=true
+ *   - `SELECT one FROM X`             → one=false (bare `one` is a column named "one")
+ *   - `SELECT DISTINCT one ID FROM X` → one=false (`one` after DISTINCT is a column)
+ *
+ * Token-based rather than a regex so these nuances fall out naturally: `ONE` is
+ * a lexer keyword, so it only tokenizes as a keyword between `SELECT` and the
+ * columns; a `DISTINCT` in between makes the next token DISTINCT (not ONE), and
+ * a following `FROM` means no column list follows.
+ * @param {string} queryText
+ * @returns {boolean}
+ */
+function selectIsOne(queryText) {
+    const sig = tokenizeCql(queryText).filter((t) => t.kind !== 'whitespace' && t.kind !== 'unknown');
+    if (sig[0]?.kind !== 'keyword' || sig[0].value.toUpperCase() !== 'SELECT') return false;
+    if (sig[1]?.kind !== 'keyword' || sig[1].value.toUpperCase() !== 'ONE') return false;
+    // A column list must follow `one` — not end-of-query and not the FROM keyword.
+    const next = sig[2];
+    if (!next) return false;
+    if (next.kind === 'keyword' && next.value.toUpperCase() === 'FROM') return false;
+    return true;
+}
+
+/**
  * Resolves the alias type expression (e.g. `{ID:number;title:string}[]` or its
  * `Promise<…>` form) for a single cds.ql query. Thin wrapper over
  * `resolveRowTypeBody` that applies the array/awaited wrapping. Returns null on a
@@ -470,7 +499,9 @@ function resolveTypeExpr(ts, queryText, effectivePrefix, awaited, projectRoot, r
     const typeBody = resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatchWorker, logger);
     if (typeBody === null) return null;
 
-    const innerType = `{${typeBody}}[]`;
+    // `SELECT one …` returns a single row; every other SELECT returns an array.
+    const row = `{${typeBody}}`;
+    const innerType = selectIsOne(queryText) ? row : `${row}[]`;
     return awaited ? innerType : `Promise<${innerType}>`;
 }
 
@@ -677,4 +708,5 @@ module.exports = {
     rewriteSnapshot,
     writeStatementValueType,
     WRITE_STATEMENT_RE,
+    selectIsOne,
 };
