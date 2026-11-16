@@ -1,0 +1,13 @@
+{
+	"_comment": "V8 block-coverage ratchet for src/cql/endpoints.js, driven ONLY by the differential + completion batteries (see coverage-runner.js). 'minCovered' is a floor that moves UP only: a drop fails the ratchet test and names the newly-uncovered lines; a rise passes and prints a note to bump this number. Lowering it requires editing this file (a conspicuous, reviewable diff), usually alongside a new 'exclusions' entry. 'total'/'pct' are informational, not asserted. A Node major-version bump can shift V8 block granularity and require recomputing the baseline.",
+	"minCovered": 256,
+	"total": 300,
+	"pct": 85.3,
+	"exclusions": [
+		{ "fn": "validateCqlQuery", "startLine": 358, "endLine": 358, "reason": "defensive head.kind==='identifier' guard; real statement heads always tokenize as keywords" },
+		{ "fn": "validateWriteStatement", "startLine": 622, "endLine": 625, "reason": "INSERT-without-INTO and missing-target partial-input guards" },
+		{ "fn": "getSuggestions", "startLine": 271, "endLine": 271, "reason": "exhaustive-switch fallthrough return [] — no real clause reaches it" },
+		{ "fn": "validateCqlQuery", "startLine": 470, "endLine": 471, "reason": "standalone '.' punctuation only reachable via malformed tokenization" },
+		{ "fn": "resolveAssocPath", "startLine": 43, "endLine": 43, "reason": "association target missing from the compiled model — not model-derivable" }
+	]
+}
