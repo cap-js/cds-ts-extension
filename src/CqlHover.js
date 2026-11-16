@@ -302,8 +302,9 @@ function getCqlHover(fileName, position, ctx, typescript) {
                     displayType = resolved.awaited ? value : `Promise<${value}>`;
                 } else {
                     const rowBody = buildHoverRowBody(resolved.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger);
-                    // `SELECT one …` yields a single row; every other SELECT an array.
-                    const typeStr = rowBody === null ? 'unknown' : selectIsOne(queryText) ? `{ ${rowBody} }` : `{ ${rowBody} }[]`;
+                    // `SELECT one …` yields a single row or `undefined` (no match);
+                    // every other SELECT an array.
+                    const typeStr = rowBody === null ? 'unknown' : selectIsOne(queryText) ? `{ ${rowBody} } | undefined` : `{ ${rowBody} }[]`;
                     displayType = resolved.awaited ? typeStr : `Promise<${typeStr}>`;
                 }
                 const span = {

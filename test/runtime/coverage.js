@@ -34,6 +34,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 /**
  * @typedef {object} V8Range
@@ -62,7 +63,13 @@ const path = require('node:path');
  * @returns {ScriptCoverage | null}
  */
 function loadMergedScriptCoverage(covDir, absFile) {
-    const fileUrl = `file://${absFile}`;
+    // Build the expected file:// URL the platform-correct way (file:///C:/… on
+    // Windows, URL-escaped spaces, etc.) rather than string-concatenating.
+    const fileUrl = pathToFileURL(absFile).href;
+    // Suffix fallback for macOS /private symlink normalization: compare the
+    // trailing path segments on the URL form so it is slash-consistent across
+    // platforms (V8 URLs always use forward slashes).
+    const urlSuffix = fileUrl.slice(fileUrl.indexOf('://') + 2);
     /** @type {Map<string, V8Range>} key `start:end` -> merged range */
     const merged = new Map();
     let matched = false;
@@ -76,9 +83,9 @@ function loadMergedScriptCoverage(covDir, absFile) {
             continue; // a half-written file is not our concern; skip it
         }
         for (const script of json.result ?? []) {
-            // Match by absolute path suffix so a file:// prefix or /private symlink
-            // normalization on macOS doesn't cause a miss.
-            if (script.url !== fileUrl && !String(script.url).endsWith(absFile)) continue;
+            // Exact URL match, or a suffix match on the URL form (handles the
+            // /private symlink prefix on macOS) — both slash-consistent.
+            if (script.url !== fileUrl && !String(script.url).endsWith(urlSuffix)) continue;
             matched = true;
             for (const fn of script.functions ?? []) {
                 for (const r of fn.ranges ?? []) {

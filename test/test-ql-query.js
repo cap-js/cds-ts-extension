@@ -2665,7 +2665,7 @@ describe('getCqlHover — proxy simulation', () => {
         assert.ok(text.includes('Promise<'), `expected Promise< for non-awaited, got: ${text}`);
     });
 
-    it('awaited `SELECT one …` result variable hover shows a single row (not an array)', () => {
+    it('awaited `SELECT one …` result variable hover shows a single row | undefined (not an array)', () => {
         const query = 'SELECT one id FROM Books';
         const src = `const r = await cds.ql\`${query}\`;\nconsole.log(r);`;
         const posInSrc = src.lastIndexOf('r');
@@ -2676,9 +2676,10 @@ describe('getCqlHover — proxy simulation', () => {
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
         assert.ok(text.includes('id: string') || text.includes('id:string'), `expected id:string in type display, got: ${text}`);
         assert.ok(!text.trim().endsWith('[]'), `\`SELECT one\` hover must be a single row, not an array, got: ${text}`);
+        assert.ok(text.includes('undefined'), `\`SELECT one\` hover must include undefined (no-match case), got: ${text}`);
     });
 
-    it('`SELECT one` (non-awaited) hover shows Promise<{…}> without array suffix', () => {
+    it('`SELECT one` (non-awaited) hover shows Promise<{…} | undefined> without array suffix', () => {
         const query = 'SELECT one id FROM Books';
         const src = `const r = cds.ql\`${query}\`;\nconsole.log(r);`;
         const posInSrc = src.lastIndexOf('r');
@@ -2688,6 +2689,7 @@ describe('getCqlHover — proxy simulation', () => {
         assert.ok(result);
         const text = (result.displayParts ?? []).map((p) => p.text).join('');
         assert.ok(text.includes('Promise<'), `expected Promise< wrapper, got: ${text}`);
+        assert.ok(text.includes('undefined'), `\`SELECT one\` hover must include undefined, got: ${text}`);
         assert.ok(!text.trim().endsWith('[]'), `\`SELECT one\` hover must not be an array, got: ${text}`);
     });
 
@@ -3839,12 +3841,14 @@ describe('SELECT one — single-row result type', () => {
         assert.equal(selectIsOne('SELECT DISTINCT one ID FROM Books'), false, 'one after DISTINCT is a column');
     });
 
-    it('SELECT one (awaited) → single row {…}', () => {
-        assert.equal(expr('SELECT one ID FROM Books', true), '{ID:string}');
+    it('SELECT one (awaited) → single row or undefined', () => {
+        // `SELECT one` returns undefined when no row matches (verified against the
+        // real @sap/cds runtime), so the type must include `| undefined`.
+        assert.equal(expr('SELECT one ID FROM Books', true), '{ID:string} | undefined');
     });
 
-    it('SELECT one (non-awaited) → Promise<{…}>', () => {
-        assert.equal(expr('SELECT one ID FROM Books', false), 'Promise<{ID:string}>');
+    it('SELECT one (non-awaited) → Promise<{…} | undefined>', () => {
+        assert.equal(expr('SELECT one ID FROM Books', false), 'Promise<{ID:string} | undefined>');
     });
 
     it('SELECT without one stays an array {…}[]', () => {

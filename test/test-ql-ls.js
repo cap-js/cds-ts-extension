@@ -954,13 +954,15 @@ describe('LS integration — type inference', () => {
         assert.ok(typeStr.includes('ID') && typeStr.includes('string'), 'non-awaited result must include the field type, got: ' + typeStr);
     });
 
-    it('awaited `SELECT one …` result variable resolves to a single row, not an array', () => {
+    it('awaited `SELECT one …` result variable resolves to a single row | undefined (not an array)', () => {
         const src = 'const result = await cds.ql`SELECT one ID FROM Books                  `;\nexport {};';
         const { rewritten } = makeLs('test.ts', src, fieldsWorker([{ label: 'ID', detail: 'cds.UUID' }]), fieldsBatchWorker([{ label: 'ID', detail: 'cds.UUID' }]));
         const typeStr = resolveVarType(rewritten, 'result');
         assert.ok(!typeStr.includes('Promise'), 'awaited result must not be a Promise, got: ' + typeStr);
         assert.ok(typeStr.includes('ID') && typeStr.includes('string'), 'result must include the field type {ID: string}, got: ' + typeStr);
         assert.ok(!typeStr.trim().endsWith('[]'), '`SELECT one` result must be a single row, not an array, got: ' + typeStr);
+        // `SELECT one` can return undefined (no match) — the type must reflect that.
+        assert.ok(typeStr.includes('undefined'), '`SELECT one` result must include undefined, got: ' + typeStr);
     });
 
     it('hover on result variable does not show "var undefined"', () => {

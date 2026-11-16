@@ -499,9 +499,11 @@ function resolveTypeExpr(ts, queryText, effectivePrefix, awaited, projectRoot, r
     const typeBody = resolveRowTypeBody(ts, queryText, effectivePrefix, projectRoot, runBatchWorker, logger);
     if (typeBody === null) return null;
 
-    // `SELECT one …` returns a single row; every other SELECT returns an array.
+    // `SELECT one …` returns a single row — or `undefined` when no row matches
+    // (verified against the real @sap/cds runtime; it does not throw). Every
+    // other SELECT returns an array.
     const row = `{${typeBody}}`;
-    const innerType = selectIsOne(queryText) ? row : `${row}[]`;
+    const innerType = selectIsOne(queryText) ? `${row} | undefined` : `${row}[]`;
     return awaited ? innerType : `Promise<${innerType}>`;
 }
 

@@ -162,7 +162,11 @@ describe('runtime assumptions', () => {
                 const scalars = await db.run({ SELECT: { from: { ref: ['rt.Scalars'] } } });
                 const upd = await db.run(cdsApi.ql.UPDATE('rt.Books').set({ title: 'B' }).where({ ID: 10 }));
                 const del = await db.run(cdsApi.ql.DELETE.from('rt.Books').where({ ID: 11 }));
-                return { toMany, toOne, flat, agg, scalars: scalars[0], upd, del };
+                // `SELECT one`: single row on a match, `undefined` on no match — this
+                // is what the plugin's single-row type (`{…} | undefined`) claims.
+                const oneHit = await db.run(cdsApi.ql`SELECT one ID, title FROM rt.Books WHERE ID = 10`);
+                const oneMiss = await db.run(cdsApi.ql`SELECT one ID, title FROM rt.Books WHERE ID = 9999`);
+                return { toMany, toOne, flat, agg, scalars: scalars[0], upd, del, oneHit, oneMiss };
             });
         } catch (err) {
             if (err instanceof SqliteUnavailable) {
@@ -197,6 +201,13 @@ describe('runtime assumptions', () => {
         // UPDATE/DELETE return number (affected-row count) — plugin claims 'number'.
         assert.equal(typeof live.upd, 'number', 'UPDATE must return a number');
         assert.equal(typeof live.del, 'number', 'DELETE must return a number');
+
+        // `SELECT one` returns a single row object on a match, and `undefined`
+        // (not null, not a throw, not []) on no match — this is the runtime
+        // ground truth behind the plugin's `{…} | undefined` single-row type.
+        assert.equal(live.oneHit?.ID, 10, 'SELECT one with a match must return the single row');
+        assert.ok(!Array.isArray(live.oneHit), 'SELECT one must not return an array');
+        assert.equal(live.oneMiss, undefined, 'SELECT one with no match must return undefined');
 
         // cdsTypeToTs claim vs live typeof, per scalar element.
         const scalarEls = raw['rt.Scalars'].elements;
