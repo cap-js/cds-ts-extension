@@ -26,6 +26,7 @@ const {
     offsetInTemplate,
     rewriteSnapshot,
     resolveToCdsQuery,
+    selectIsOne,
 } = require('../src/CqlTypeRewriter');
 const { getCqlCompletions, getCqlCompletionDetails } = require('../src/CqlCompletions');
 const { getCqlHover } = require('../src/CqlHover');
@@ -469,9 +470,9 @@ describe('getSuggestions — keywords', () => {
             .map((i) => i.label);
     };
 
-    it('offers DISTINCT and FROM in the SELECT clause', () => {
-        includesAll(kws('SELECT | FROM Books'), ['DISTINCT', 'FROM']);
-        includesAll(kws('SELECT ID |'), ['DISTINCT', 'FROM']);
+    it('offers DISTINCT, ONE and FROM in the SELECT clause', () => {
+        includesAll(kws('SELECT | FROM Books'), ['DISTINCT', 'ONE', 'FROM']);
+        includesAll(kws('SELECT ID |'), ['DISTINCT', 'ONE', 'FROM']);
     });
 
     it('offers transition keywords after a named FROM source', () => {
@@ -2664,6 +2665,34 @@ describe('getCqlHover — proxy simulation', () => {
         assert.ok(text.includes('Promise<'), `expected Promise< for non-awaited, got: ${text}`);
     });
 
+    it('awaited `SELECT one …` result variable hover shows a single row | undefined (not an array)', () => {
+        const query = 'SELECT one id FROM Books';
+        const src = `const r = await cds.ql\`${query}\`;\nconsole.log(r);`;
+        const posInSrc = src.lastIndexOf('r');
+        const worker = fieldsWorker([{ label: 'id', detail: 'cds.UUID' }]);
+        const ctx = makeCtx(src, worker);
+        const result = getCqlHover('test.ts', posInSrc, ctx, TS);
+        assert.ok(result, 'expected QuickInfo for result variable hover');
+        const text = (result.displayParts ?? []).map((p) => p.text).join('');
+        assert.ok(text.includes('id: string') || text.includes('id:string'), `expected id:string in type display, got: ${text}`);
+        assert.ok(!text.trim().endsWith('[]'), `\`SELECT one\` hover must be a single row, not an array, got: ${text}`);
+        assert.ok(text.includes('undefined'), `\`SELECT one\` hover must include undefined (no-match case), got: ${text}`);
+    });
+
+    it('`SELECT one` (non-awaited) hover shows Promise<{…} | undefined> without array suffix', () => {
+        const query = 'SELECT one id FROM Books';
+        const src = `const r = cds.ql\`${query}\`;\nconsole.log(r);`;
+        const posInSrc = src.lastIndexOf('r');
+        const worker = fieldsWorker([{ label: 'id', detail: 'cds.UUID' }]);
+        const ctx = makeCtx(src, worker);
+        const result = getCqlHover('test.ts', posInSrc, ctx, TS);
+        assert.ok(result);
+        const text = (result.displayParts ?? []).map((p) => p.text).join('');
+        assert.ok(text.includes('Promise<'), `expected Promise< wrapper, got: ${text}`);
+        assert.ok(text.includes('undefined'), `\`SELECT one\` hover must include undefined, got: ${text}`);
+        assert.ok(!text.trim().endsWith('[]'), `\`SELECT one\` hover must not be an array, got: ${text}`);
+    });
+
     it('textSpan for field token points to correct offset in original source', () => {
         const query = 'SELECT id FROM Books';
         const src = `const r = cds.ql\`${query}\``;
@@ -3119,6 +3148,30 @@ describe('serviceAnnotationFor', () => {
     it('works with indented annotation and statement', () => {
         const src = 'function f() {\n  // @cds-service Inner\n  const r = cds.ql`SELECT id FROM Books`\n}';
         assert.equal(annotationFor(src), 'Inner');
+    });
+
+    it('reads annotation for a bare ExpressionStatement (no assignment)', () => {
+        const src = '// @cds-service BareService\nawait cds.ql`DELETE FROM Books`';
+        assert.equal(annotationFor(src), 'BareService');
+    });
+
+    it('returns undefined for a bare ExpressionStatement with no annotation', () => {
+        const src = 'await cds.ql`DELETE FROM Books`';
+        assert.equal(annotationFor(src), undefined);
+    });
+
+    it('uses per-statement annotation for mixed assigned and bare expressions', () => {
+        const src = ['// @cds-service Svc1', 'const x = cds.ql`SELECT id FROM Books`', '// @cds-service Svc2', 'await cds.ql`DELETE FROM Authors`'].join('\n');
+        const sf = TS.createSourceFile('t.ts', src, TS.ScriptTarget.Latest, true, TS.ScriptKind.TS);
+        const templates = [];
+        function visit(n) {
+            if (TS.isTaggedTemplateExpression(n)) templates.push(n);
+            TS.forEachChild(n, visit);
+        }
+        visit(sf);
+        assert.equal(templates.length, 2);
+        assert.equal(serviceAnnotationFor(TS, src, templates[0], sf), 'Svc1');
+        assert.equal(serviceAnnotationFor(TS, src, templates[1], sf), 'Svc2');
     });
 });
 
@@ -3766,6 +3819,50 @@ describe('resolveTypeExpr — write statements', () => {
         const okWorker = () => ({ fields: { Books: [{ label: 'ID', kind: 'field', detail: 'cds.UUID' }] } });
         const out = resolveTypeExpr(TS, 'SELECT ID FROM Books', undefined, true, '/proj', okWorker, logger);
         assert.equal(out, '{ID:string}[]');
+    });
+});
+// ---------------------------------------------------------------------------
+// resolveTypeExpr + selectIsOne — `SELECT one …` returns a single row, not an
+// array (the in-template equivalent of CQN `SELECT.one`).
+// ---------------------------------------------------------------------------
+
+describe('SELECT one — single-row result type', () => {
+    const logger = { info() {}, error() {} };
+    const okWorker = () => ({ fields: { Books: [{ label: 'ID', kind: 'field', detail: 'cds.UUID' }] } });
+    const expr = (q, awaited) => resolveTypeExpr(TS, q, undefined, awaited, '/proj', okWorker, logger);
+
+    // selectIsOne truth table — matches the real @sap/cds CQN `SELECT.one` flag.
+    it('selectIsOne: true only for `one` immediately after SELECT, followed by columns', () => {
+        assert.equal(selectIsOne('SELECT one ID FROM Books'), true, 'one + column list');
+        assert.equal(selectIsOne('SELECT ONE ID, title FROM Books'), true, 'case-insensitive');
+        assert.equal(selectIsOne('SELECT one * FROM Books'), true, 'one + star');
+        assert.equal(selectIsOne('SELECT ID FROM Books'), false, 'no one');
+        assert.equal(selectIsOne('SELECT one FROM Books'), false, 'bare one is a column named "one"');
+        assert.equal(selectIsOne('SELECT DISTINCT one ID FROM Books'), false, 'one after DISTINCT is a column');
+    });
+
+    it('SELECT one (awaited) → single row or undefined', () => {
+        // `SELECT one` returns undefined when no row matches (verified against the
+        // real @sap/cds runtime), so the type must include `| undefined`.
+        assert.equal(expr('SELECT one ID FROM Books', true), '{ID:string} | undefined');
+    });
+
+    it('SELECT one (non-awaited) → Promise<{…} | undefined>', () => {
+        assert.equal(expr('SELECT one ID FROM Books', false), 'Promise<{ID:string} | undefined>');
+    });
+
+    it('SELECT without one stays an array {…}[]', () => {
+        assert.equal(expr('SELECT ID FROM Books', true), '{ID:string}[]');
+    });
+
+    it('bare `SELECT one FROM` (one as column) stays an array', () => {
+        // `one` is not a model field, so the worker yields no columns → unknown body;
+        // the point is it is NOT treated as the singularizer, so still array-shaped.
+        assert.ok(expr('SELECT one FROM Books', true).endsWith('[]'));
+    });
+
+    it('`SELECT DISTINCT one ID` (one as column) stays an array', () => {
+        assert.equal(expr('SELECT DISTINCT one ID FROM Books', true), '{ID:string}[]');
     });
 });
 // ---------------------------------------------------------------------------

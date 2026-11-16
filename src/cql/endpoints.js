@@ -55,7 +55,7 @@ function resolveAssocPath(defs, artifact, segments) {
  * Multi-word keywords (`ORDER BY`, `LEFT JOIN`) are single entries.
  */
 const CLAUSE_KEYWORDS = {
-    'select-item': ['DISTINCT', 'FROM'],
+    'select-item': ['DISTINCT', 'ONE', 'FROM'],
     // Offered only once an entity has been named (see getSuggestions).
     'from-source': ['WHERE', 'ORDER BY', 'GROUP BY', 'HAVING', 'LIMIT', 'OFFSET', 'JOIN', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'ON', 'AS'],
     'where-expr': ['AND', 'OR', 'NOT', 'LIKE', 'BETWEEN', 'IN', 'IS', 'NULL', 'EXISTS'],

@@ -29,6 +29,7 @@
  *   _runBatchWorker: RunBatchWorker;
  *   _workerPool: WorkerPoolLike;
  *   _shutdownPool: () => Promise<void>;
+ *   _diskCachePath: (projectRoot: string, sourceText: string) => string;
  * }} TestOverrides
  */
 
