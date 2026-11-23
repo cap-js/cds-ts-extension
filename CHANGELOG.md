@@ -10,7 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - A build plugin that points out faulty `cds.ql` queries as warnings as part of `cds build`.
-- `ONE` is now offered as a completion in the `SELECT` clause (alongside `DISTINCT`/`FROM`), and `SELECT one …` queries now infer a **single-row** result type (`{ … } | undefined` / `Promise<{ … } | undefined>`) instead of an array. The `| undefined` reflects the real `@sap/cds` runtime, where a `SELECT one` with no matching row resolves to `undefined` (not an empty array, not a throw). Recognition of the `one` singularizer already excluded it from column resolution and validation; this completes the feature by threading the cardinality into the inferred type. Detection matches the real `@sap/cds` compiler: `one` is the singularizer only immediately after `SELECT` and when a column list follows — `SELECT one FROM X` and `SELECT DISTINCT one ID FROM X` treat `one` as an ordinary column and therefore still type as arrays.
+- `ONE` completion in the `SELECT` clause, alongside `DISTINCT`/`FROM`.
+- Single-row result types for `SELECT one …`: `{ … } | undefined` when awaited, or `Promise<{ … } | undefined>`. Queries without a matching row return `undefined`. As in CAP, `one` is a singularizer only immediately after `SELECT` with a following column list; otherwise it remains an ordinary column.
 ### Changed
 - The build plugin (`cds-plugin.js`) and IDE diagnostics now validate bare `cds.ql` expression statements that are not assigned to a variable (e.g. `await cds.ql\`DELETE FROM Messages WHERE ...\``). Previously only `const x = cds.ql\`...\`` declarations were collected; standalone side-effect queries were silently skipped. The `// @cds-service` annotation is now also read correctly for bare expression statements — previously the lookup walked up to the source-file root and lost the annotation entirely.
 ### Deprecated
