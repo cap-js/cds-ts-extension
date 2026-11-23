@@ -10,7 +10,9 @@ It runs inside the TypeScript server process. After registration it has no depen
 on the CDS Language Server — it resolves `@sap/cds` directly from the user's project
 (with a global-install fallback) via a child-process worker.
 
-> **Note:** This project is in an early stage (v0.0.1) and is not yet ready for productive use.
+> **Note:** This project is in an early stage. The latest release is available on
+> npm as [`@cap-js/cds-ts-extension`](https://www.npmjs.com/package/@cap-js/cds-ts-extension);
+> APIs and behaviour may still change between versions.
 
 > The full design documentation — features, the snapshot-rewriting invariants,
 > configuration, diagnostic codes, and the worker protocol — lives in
@@ -66,16 +68,31 @@ as a dependency and registers it with tsserver via `contributes.typescriptServer
 Because `src/index.js` is the entry point directly, any edits to `src/` are picked up
 after **TypeScript: Restart TS Server** — no build step required.
 
-### Using a local checkout in a CAP project (without vscode-cds dev setup)
+### Using the plugin in a CAP project (without vscode-cds dev setup)
 
-If you want to test the plugin in isolation inside a project:
+To test the plugin in isolation inside a project, install it and register it as a
+tsserver plugin. Pick one of the two install options:
+
+**Option A — from npm (released version):**
 
 ```sh
 # In your CAP project:
-npm install /path/to/cds-ts-plugin
+npm install --save-dev @cap-js/cds-ts-extension
 ```
 
-Then add to the project's `tsconfig.json` or `jsconfig.json`:
+**Option B — from a local checkout** (for working against your own changes):
+
+```sh
+# In your CAP project:
+npm install /path/to/cds-ts-extension
+```
+
+This links the checked-out source via `file:`, so edits to `src/` take effect
+after a **TypeScript: Restart TS Server** — no build step (see
+[Development setup](#development-setup-vscode-cds--this-repo)).
+
+Then, with either option, add the plugin to the project's `tsconfig.json` or
+`jsconfig.json`:
 
 ```json
 {

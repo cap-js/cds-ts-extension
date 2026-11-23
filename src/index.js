@@ -21,7 +21,7 @@ const { Worker: WorkerThread } = require('node:worker_threads');
 const { dirname, join } = require('node:path');
 const { createHash } = require('node:crypto');
 const { tmpdir } = require('node:os');
-const { readFileSync, writeFileSync, statSync } = require('node:fs');
+const { readFileSync, writeFileSync, statSync, readdirSync } = require('node:fs');
 
 const { rewriteSnapshot } = require('./CqlTypeRewriter');
 const { getCqlCompletions, getCqlCompletionDetails } = require('./CqlCompletions');
@@ -63,12 +63,55 @@ const DISK_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
  */
 
 /**
+ * A digest of the plugin's own source, computed once at module load. It is
+ * folded into the disk-cache key so that *any* change to the plugin's rewrite /
+ * type-inference logic invalidates every previously cached snapshot — a cache
+ * entry is only reused by the exact plugin version that wrote it.
+ *
+ * Without this, the disk cache keyed on `(projectRoot, sourceText)` alone would
+ * serve a pre-change snapshot after a plugin upgrade (or a local `src/` edit),
+ * because the source text is unchanged — masking the new behaviour until the
+ * 5-minute TTL lapsed or the file text changed. Hashing the whole `src/` tree
+ * is self-maintaining (no file list to keep in sync) and costs a single ~1-2ms
+ * read at startup.
+ * @returns {string}
+ */
+function computePluginSourceDigest() {
+    const h = createHash('sha1');
+    /** @param {string} dir */
+    const walk = (dir) => {
+        /** @type {import('node:fs').Dirent[]} */
+        let entries;
+        try {
+            entries = readdirSync(dir, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+            const full = join(dir, e.name);
+            if (e.isDirectory()) walk(full);
+            else if (e.name.endsWith('.js')) {
+                try {
+                    h.update(full).update('\0').update(readFileSync(full)).update('\0');
+                } catch {
+                    /* unreadable file — skip; a missing file still changes the digest via absence */
+                }
+            }
+        }
+    };
+    walk(__dirname);
+    return h.digest('hex').slice(0, 12);
+}
+
+const CACHE_VERSION = computePluginSourceDigest();
+
+/**
  * @param {string} projectRoot
  * @param {string} sourceText
  * @returns {string}
  */
 function diskCachePath(projectRoot, sourceText) {
-    const key = createHash('sha1').update(projectRoot).update('\0').update(sourceText).digest('hex');
+    const key = createHash('sha1').update(CACHE_VERSION).update('\0').update(projectRoot).update('\0').update(sourceText).digest('hex');
     return join(tmpdir(), `cds-lsp-rewrite-${key}.json`);
 }
 
@@ -968,4 +1011,8 @@ _TEST_OVERRIDES._runWorker = runWorker;
 _TEST_OVERRIDES._runBatchWorker = runBatchWorker;
 _TEST_OVERRIDES._workerPool = WORKER_POOL;
 _TEST_OVERRIDES._shutdownPool = () => WORKER_POOL.shutdown();
+// Exposed so tests derive cache paths via the real keying logic (which now
+// includes CACHE_VERSION) instead of replicating the hash — the duplication
+// that would otherwise break whenever the key derivation changes.
+_TEST_OVERRIDES._diskCachePath = diskCachePath;
 module.exports = pluginFactory;

@@ -14,15 +14,22 @@
 
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
+const { spawnSync } = require('node:child_process');
 const { describe, it } = require('node:test');
 
 const { compileFlavors, withSqlite, sqlColumns, SqliteUnavailable } = require('./oracle');
 const schemas = require('./schemas');
 const { cdsTypeToTs, resolveBaseType, isToMany, elementNamesWithForeignKeys, followAssocPath } = require('../../src/cql/csn-resolve');
 const { validateCqlQuery, getSuggestions } = require('../../src/cql/endpoints');
-const { deriveTruth, buildBattery } = require('./differential');
+const { deriveTruth, buildBattery, buildWriteBattery, buildCompletionBattery } = require('./differential');
+const { loadMergedScriptCoverage, computeEndpointsCoverage } = require('./coverage');
 
 const FIXTURE_ROOT = path.join(__dirname, '..', 'data', 'runtimeModel');
+const ENDPOINTS_FILE = path.resolve(__dirname, '..', '..', 'src', 'cql', 'endpoints.js');
+const COVERAGE_BASELINE = path.join(__dirname, 'coverage-baseline.json');
+const COVERAGE_RUNNER = path.join(__dirname, 'coverage-runner.js');
 
 describe('runtime assumptions', () => {
     /** @type {import('./oracle').CsnFlavors} */
@@ -155,7 +162,11 @@ describe('runtime assumptions', () => {
                 const scalars = await db.run({ SELECT: { from: { ref: ['rt.Scalars'] } } });
                 const upd = await db.run(cdsApi.ql.UPDATE('rt.Books').set({ title: 'B' }).where({ ID: 10 }));
                 const del = await db.run(cdsApi.ql.DELETE.from('rt.Books').where({ ID: 11 }));
-                return { toMany, toOne, flat, agg, scalars: scalars[0], upd, del };
+                // `SELECT one`: single row on a match, `undefined` on no match — this
+                // is what the plugin's single-row type (`{…} | undefined`) claims.
+                const oneHit = await db.run(cdsApi.ql`SELECT one ID, title FROM rt.Books WHERE ID = 10`);
+                const oneMiss = await db.run(cdsApi.ql`SELECT one ID, title FROM rt.Books WHERE ID = 9999`);
+                return { toMany, toOne, flat, agg, scalars: scalars[0], upd, del, oneHit, oneMiss };
             });
         } catch (err) {
             if (err instanceof SqliteUnavailable) {
@@ -191,6 +202,13 @@ describe('runtime assumptions', () => {
         assert.equal(typeof live.upd, 'number', 'UPDATE must return a number');
         assert.equal(typeof live.del, 'number', 'DELETE must return a number');
 
+        // `SELECT one` returns a single row object on a match, and `undefined`
+        // (not null, not a throw, not []) on no match — this is the runtime
+        // ground truth behind the plugin's `{…} | undefined` single-row type.
+        assert.equal(live.oneHit?.ID, 10, 'SELECT one with a match must return the single row');
+        assert.ok(!Array.isArray(live.oneHit), 'SELECT one must not return an array');
+        assert.equal(live.oneMiss, undefined, 'SELECT one with no match must return undefined');
+
         // cdsTypeToTs claim vs live typeof, per scalar element.
         const scalarEls = raw['rt.Scalars'].elements;
         for (const [name, value] of Object.entries(live.scalars)) {
@@ -221,25 +239,37 @@ describe('differential oracle (plugin vs CSN truth)', () => {
     let truth;
     /** @type {import('./differential').BatteryCase[]} */
     let battery;
+    /** @type {import('./differential').BatteryCase[]} */
+    let writeBattery;
+    /** @type {import('./differential').CompletionCase[]} */
+    let completionBattery;
 
     it('derives a battery covering every case category (anti-rot)', async () => {
         flavors = await compileFlavors(FIXTURE_ROOT);
         truth = deriveTruth(flavors);
         battery = buildBattery(truth);
+        writeBattery = buildWriteBattery(truth);
+        completionBattery = buildCompletionBattery(truth);
         assert.ok(truth.size >= 4, `expected >=4 entities in truth model, got ${truth.size}`);
-        // Per-category floor: an aggregate count can be satisfied by own+ghost cases
-        // alone, so deleting FK or association-path generation would stay green under
-        // a single total floor. Require each category to be non-empty so removing any
-        // generator fails loudly. Counts are derived from the fixture, which has
-        // managed associations (→ FKs + assoc-paths) and plain columns.
+        // Per-category floor: require each category to be non-empty so removing any
+        // generator fails loudly. The canonical shape generators and the per-entity
+        // sweeps each contribute distinct categories — a dropped generator empties
+        // its category here, and the coverage ratchet (below) catches a dropped
+        // code path even if the category stays non-empty. Together they replace the
+        // old magic `length >= 20` floors, which proved nothing about *what* was
+        // covered.
         const byCat = (c) => battery.filter((x) => x.category === c).length;
-        for (const cat of ['own', 'fk', 'assoc-path', 'invalid']) {
+        for (const cat of ['own', 'fk', 'assoc-path', 'invalid', 'shape-valid', 'shape-invalid']) {
             assert.ok(byCat(cat) > 0, `differential battery has no '${cat}' cases — that generator may have been removed`);
         }
-        assert.ok(battery.length >= 20, `differential battery too small (${battery.length}) — oracle may have been stubbed to a no-op`);
+        const byWriteCat = (c) => writeBattery.filter((x) => x.category === c).length;
+        for (const cat of ['write-valid', 'write-invalid']) {
+            assert.ok(byWriteCat(cat) > 0, `write battery has no '${cat}' cases — that generator may have been removed`);
+        }
+        assert.ok(completionBattery.length > 0, 'completion battery is empty — buildCompletionBattery may have been stubbed');
     });
 
-    it('validateCqlQuery agrees with the model on every battery case', () => {
+    it('validateCqlQuery agrees with the model on every SELECT battery case', () => {
         /** @type {string[]} */
         const disagreements = [];
         for (const { query, valid, why } of battery) {
@@ -250,6 +280,19 @@ describe('differential oracle (plugin vs CSN truth)', () => {
             }
         }
         assert.deepEqual(disagreements, [], `plugin disagrees with CSN truth on ${disagreements.length} case(s):\n  ${disagreements.join('\n  ')}`);
+    });
+
+    it('validateCqlQuery agrees with the model on every write-statement battery case', () => {
+        /** @type {string[]} */
+        const disagreements = [];
+        for (const { query, valid, why } of writeBattery) {
+            const errs = validateCqlQuery(query, flavors.raw.definitions, undefined);
+            const pluginSaysValid = errs.length === 0;
+            if (pluginSaysValid !== valid) {
+                disagreements.push(`${why}: model=${valid ? 'valid' : 'invalid'} plugin=${pluginSaysValid ? 'valid' : 'invalid'} [${errs.map((e) => e.message).join('; ')}]`);
+            }
+        }
+        assert.deepEqual(disagreements, [], `plugin disagrees with CSN truth on ${disagreements.length} write case(s):\n  ${disagreements.join('\n  ')}`);
     });
 
     it('getSuggestions offers only fields that exist in the model (no phantom completions)', () => {
@@ -268,5 +311,87 @@ describe('differential oracle (plugin vs CSN truth)', () => {
         }
         assert.ok(checked >= 20, `too few completion items checked (${checked}) — completion oracle may be a no-op`);
         assert.deepEqual(phantoms, [], `phantom completions:\n  ${phantoms.join('\n  ')}`);
+    });
+
+    it('getSuggestions offers only model fields for UPDATE SET completions (no phantom completions)', () => {
+        /** @type {string[]} */
+        const phantoms = [];
+        let checked = 0;
+        for (const { fqn, own, fks } of truth.values()) {
+            const valid = new Set([...own, ...fks]);
+            // Cursor right after `UPDATE <fqn> SET ` → field completions for SET LHS.
+            const query = `UPDATE ${fqn} SET `;
+            const cursor = query.length;
+            const offered = getSuggestions(query, cursor, flavors.raw.definitions, undefined).filter((i) => i.kind === 'field');
+            for (const item of offered) {
+                checked++;
+                if (!valid.has(item.label)) phantoms.push(`${fqn}: offered SET field '${item.label}' not in model`);
+            }
+        }
+        assert.ok(checked >= 4, `too few UPDATE SET completion items checked (${checked}) — oracle may be a no-op`);
+        assert.deepEqual(phantoms, [], `phantom UPDATE SET completions:\n  ${phantoms.join('\n  ')}`);
+    });
+
+    it('getSuggestions agrees with the model on every completion-battery case', () => {
+        /** @type {string[]} */
+        const problems = [];
+        for (const c of completionBattery) {
+            const items = getSuggestions(c.query, c.cursor, flavors.raw.definitions, c.prefix);
+            const offered = items.filter((i) => i.kind === c.kind).map((i) => i.label);
+            // Required labels must be offered (the clause reaches the right branch).
+            for (const label of c.mustInclude ?? []) {
+                if (!offered.includes(label)) problems.push(`${c.why}: expected ${c.kind} '${label}' in [${offered.join(', ')}]`);
+            }
+            // Field completions must never invent a label absent from the model.
+            if (c.fieldRule === 'field-subset-of-model') {
+                const modelNames = new Set();
+                for (const { own, fks } of truth.values()) {
+                    for (const n of own) modelNames.add(n);
+                    for (const n of fks) modelNames.add(n);
+                }
+                for (const label of offered) {
+                    if (!modelNames.has(label)) problems.push(`${c.why}: offered phantom field '${label}'`);
+                }
+            }
+        }
+        assert.deepEqual(problems, [], `completion disagreements:\n  ${problems.join('\n  ')}`);
+    });
+
+    it('differential battery meets the endpoints.js coverage ratchet', () => {
+        // Run the batteries in a CHILD under NODE_V8_COVERAGE so the measured
+        // surface is exactly the validator — not this harness or the ~230ms CSN
+        // compile. The ratchet asserts the model-derived batteries still reach at
+        // least `minCovered` V8 blocks of endpoints.js; a drop means a code path
+        // lost its honest (reality-checked) case and is now guarded only by
+        // assumption-mirroring unit tests. See coverage.js / coverage-baseline.json.
+        const baseline = JSON.parse(fs.readFileSync(COVERAGE_BASELINE, 'utf8'));
+        const covDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cql-ratchet-'));
+        try {
+            const res = spawnSync(process.execPath, [COVERAGE_RUNNER], {
+                env: { ...process.env, NODE_V8_COVERAGE: covDir },
+                encoding: 'utf8',
+            });
+            assert.equal(res.status, 0, `coverage-runner exited ${res.status}:\n${res.stderr}`);
+            const manifest = JSON.parse(res.stdout.trim().split('\n').pop() ?? '{}');
+            assert.ok(manifest.cases > 0, `coverage-runner reported no cases (${res.stdout}) — runner may be a no-op`);
+
+            const scriptCov = loadMergedScriptCoverage(covDir, ENDPOINTS_FILE);
+            assert.ok(scriptCov, `no V8 coverage found for ${ENDPOINTS_FILE} in ${covDir} — measurement failed`);
+            const src = fs.readFileSync(ENDPOINTS_FILE, 'utf8');
+            const { covered, total, pct, uncovered } = computeEndpointsCoverage(scriptCov, src, baseline.exclusions);
+
+            if (covered > baseline.minCovered) {
+                console.log(`NOTE: endpoints.js coverage rose to ${covered}/${total} (${pct.toFixed(1)}%); bump minCovered in coverage-baseline.json from ${baseline.minCovered} to ${covered}.`);
+            }
+            const uncoveredLines = uncovered.map((u) => (u.startLine === u.endLine ? `L${u.startLine}` : `L${u.startLine}-${u.endLine}`)).join(', ');
+            assert.ok(
+                covered >= baseline.minCovered,
+                `endpoints.js coverage dropped to ${covered} blocks (floor ${baseline.minCovered}). A validator path lost its model-derived case.\n` +
+                    `Uncovered now: ${uncoveredLines}\n` +
+                    'Restore the battery case that reached it, or — if the path is genuinely unreachable from a model-derived query — lower minCovered and add an exclusions entry (with a reason) in coverage-baseline.json.',
+            );
+        } finally {
+            fs.rmSync(covDir, { recursive: true, force: true });
+        }
     });
 });

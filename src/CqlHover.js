@@ -4,7 +4,7 @@
 
 /** @typedef {import('./CqlLogic').CompletionEntry} CompletionEntry */
 const { cdsTypeToTs, CQL_KEYWORDS, extractSourceRelations, getTokenContext, tokenizeCql } = require('./CqlLogic');
-const { extractTemplateText, findCdsQueryTemplate, offsetInTemplate, resolveRowTypeBody, resolveToCdsQuery, writeStatementValueType, WRITE_STATEMENT_RE } = require('./CqlTypeRewriter');
+const { extractTemplateText, findCdsQueryTemplate, offsetInTemplate, resolveRowTypeBody, resolveToCdsQuery, writeStatementValueType, WRITE_STATEMENT_RE, selectIsOne } = require('./CqlTypeRewriter');
 /** @typedef {import('./CqlTypeRewriter').CqlTemplateRef} CqlTemplateRef */
 const { parseCqlColumns } = require('./CqlLogic');
 const { isCdsQueryTag, isScopeBoundary, isNamedVarDecl, unwrapAwait } = require('./TsAstHelpers');
@@ -302,7 +302,9 @@ function getCqlHover(fileName, position, ctx, typescript) {
                     displayType = resolved.awaited ? value : `Promise<${value}>`;
                 } else {
                     const rowBody = buildHoverRowBody(resolved.template, typescript, origText, origSf, projectRoot, ctx.runBatchWorker, ctx.logger);
-                    const typeStr = rowBody === null ? 'unknown' : `{ ${rowBody} }[]`;
+                    // `SELECT one …` yields a single row or `undefined` (no match);
+                    // every other SELECT an array.
+                    const typeStr = rowBody === null ? 'unknown' : selectIsOne(queryText) ? `{ ${rowBody} } | undefined` : `{ ${rowBody} }[]`;
                     displayType = resolved.awaited ? typeStr : `Promise<${typeStr}>`;
                 }
                 const span = {

@@ -44,6 +44,23 @@ const pluginFactory = require('../src/index');
  */
 const testOverrides = () => pluginFactory._testOverrides;
 
+/**
+ * The disk-cache hash for a `(projectRoot, sourceText)` pair, derived from the
+ * plugin's REAL `diskCachePath` (exposed via `_testOverrides._diskCachePath`)
+ * rather than replicating the hash here. The plugin folds a `CACHE_VERSION`
+ * (digest of its own source) into the key, so a local copy of the formula would
+ * silently drift; this cannot. Returns just the hex key (the part between
+ * `cds-lsp-rewrite-` and `.json`) so existing `` `cds-lsp-rewrite-${key}.json` ``
+ * call sites keep working unchanged.
+ * @param {string} projectRoot
+ * @param {string} sourceText
+ * @returns {string}
+ */
+const diskKey = (projectRoot, sourceText) => {
+    const p = testOverrides()._diskCachePath(projectRoot, sourceText);
+    return /cds-lsp-rewrite-([0-9a-f]+)\.json$/.exec(p)?.[1] ?? '';
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -1627,7 +1644,7 @@ describe('Plugin proxy — debounced rewriting', () => {
         const tmp = tmpdir();
         const src2 = 'const r = await cds.ql`SELECT id FROM DebounceWrite`;\nexport {};';
         const fn2 = join(tmp, `debounce-write-${Date.now()}.ts`);
-        const key = createHash('sha1').update(tmp).update('\0').update(src2).digest('hex');
+        const key = diskKey(tmp, src2);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         try {
             unlinkSync(cachePath);
@@ -1698,7 +1715,7 @@ describe('Plugin proxy — debounced rewriting', () => {
             si2.getSnapshot();
             assert.ok(timers2.length > 0, 'debounce timer must be scheduled after source change');
             // Fire the timer → writeDiskCache called (line 363)
-            const key2 = createHash('sha1').update(tmp).update('\0').update(src2b).digest('hex');
+            const key2 = diskKey(tmp, src2b);
             const cachePath2 = join(tmp, `cds-lsp-rewrite-${key2}.json`);
             try {
                 unlinkSync(cachePath2);
@@ -1746,7 +1763,7 @@ describe('Plugin proxy — debounced rewriting', () => {
 
         // Clear any disk-cache entries for both revisions so cold start must hit the worker.
         for (const s of [srcA, srcB]) {
-            const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
+            const key = diskKey(tmp, s);
             try {
                 unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
             } catch {
@@ -1855,7 +1872,7 @@ describe('Plugin proxy — debounced rewriting', () => {
             global.clearTimeout = origClearTimeout;
             delete testOverrides().rwBatch;
             for (const s of [srcA, srcB]) {
-                const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
+                const key = diskKey(tmp, s);
                 try {
                     unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
                 } catch {
@@ -1894,7 +1911,7 @@ describe('Plugin proxy — debounced rewriting', () => {
         const srcB = srcA.replace('FROM SyncMultiAuthors`', 'FROM  SyncMultiAuthors`');
 
         for (const s of [srcA, srcB]) {
-            const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
+            const key = diskKey(tmp, s);
             try {
                 unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
             } catch {
@@ -1991,7 +2008,7 @@ describe('Plugin proxy — debounced rewriting', () => {
             global.clearTimeout = origClearTimeout;
             delete testOverrides().rwBatch;
             for (const s of [srcA, srcB]) {
-                const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
+                const key = diskKey(tmp, s);
                 try {
                     unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
                 } catch {
@@ -2031,7 +2048,7 @@ describe('Plugin proxy — debounced rewriting', () => {
         const delta = srcB.length - srcA.length; // +1
 
         for (const s of [srcA, srcB]) {
-            const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
+            const key = diskKey(tmp, s);
             try {
                 unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
             } catch {
@@ -2127,7 +2144,7 @@ describe('Plugin proxy — debounced rewriting', () => {
             global.clearTimeout = origClearTimeout;
             delete testOverrides().rwBatch;
             for (const s of [srcA, srcB]) {
-                const key = createHash('sha1').update(tmp).update('\0').update(s).digest('hex');
+                const key = diskKey(tmp, s);
                 try {
                     unlinkSync(join(tmp, `cds-lsp-rewrite-${key}.json`));
                 } catch {
@@ -2181,7 +2198,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const projectRoot = tmp;
 
         // Replicate diskCachePath logic: sha1(projectRoot + '\0' + sourceText)
-        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
+        const key = diskKey(projectRoot, src);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
 
         const entry = {
@@ -2250,7 +2267,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const fileName = join(tmp, 'dc-corrupt.ts');
         const projectRoot = tmp;
 
-        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
+        const key = diskKey(projectRoot, src);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
 
         // Write corrupt JSON — readDiskCache's try/catch returns null, triggering worker fallback
@@ -2318,7 +2335,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const fileName = join(tmp, `wdc-test-${Date.now()}.ts`);
         const projectRoot = tmp;
 
-        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
+        const key = diskKey(projectRoot, src);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         try {
             unlinkSync(cachePath);
@@ -2399,7 +2416,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const tmp = tmpdir();
         const fileName = join(tmp, `dc-expired-${Date.now()}.ts`);
         const projectRoot = tmp;
-        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
+        const key = diskKey(projectRoot, src);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
 
         // Write a valid cache entry
@@ -2481,7 +2498,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const tmp = tmpdir();
         const fileName = join(tmp, `rw-cache-hit-${Date.now()}.ts`);
         const projectRoot = tmp;
-        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
+        const key = diskKey(projectRoot, src);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         try {
             unlinkSync(cachePath);
@@ -2559,7 +2576,7 @@ describe('Disk cache — cold-start path reads pre-written cache entry', () => {
         const tmp = tmpdir();
         const fileName = join(tmp, `dc-ranges-${Date.now()}.ts`);
         const projectRoot = tmp;
-        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
+        const key = diskKey(projectRoot, src);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
 
         // Write cache entry WITH non-empty ranges (triggers arm=0 of b25)
@@ -2638,7 +2655,7 @@ describe('Plugin workers — runWorker and runBatchWorker via _testOverrides', (
         // This ensures the disk cache key is unique to this test.
         const tmp = tmpdir();
         const fileName = join(tmp, 'rw-batch-test.ts');
-        const key = createHash('sha1').update(tmp).update('\0').update(src).digest('hex');
+        const key = diskKey(tmp, src);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         try {
             unlinkSync(cachePath);
@@ -2719,7 +2736,7 @@ describe('Plugin workers — runWorker and runBatchWorker via _testOverrides', (
         const src = 'const r = await cds.ql`SELECT id FROM Books`;\nexport {};';
         const tmp = tmpdir();
         const fileName = join(tmp, 'rw-single-test.ts');
-        const key = createHash('sha1').update(tmp).update('\0').update(src).digest('hex');
+        const key = diskKey(tmp, src);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         try {
             unlinkSync(cachePath);
@@ -3096,7 +3113,7 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
         const fileName = join(tmp, 'si-rw-test.ts');
         const projectRoot = tmp;
 
-        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
+        const key = diskKey(projectRoot, src);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         writeFileSync(
             cachePath,
@@ -3183,7 +3200,7 @@ describe('Plugin factory — tsserver API paths exercised via mocks', () => {
         const projectRoot = tmp;
 
         // Write cache for src (not src2) so the first call hits it
-        const key = createHash('sha1').update(projectRoot).update('\0').update(src).digest('hex');
+        const key = diskKey(projectRoot, src);
         const cachePath = join(tmp, `cds-lsp-rewrite-${key}.json`);
         writeFileSync(
             cachePath,
